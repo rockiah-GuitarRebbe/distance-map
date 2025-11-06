@@ -2,10 +2,11 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Distance Map — Workers (Live)</title>
+  <title>Distance Map — Workers + Excel</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <style>
     body {
       font-family: system-ui, Arial, sans-serif;
@@ -19,6 +20,7 @@
       display: flex;
       justify-content: space-between;
       align-items: center;
+      gap: 8px;
     }
     #facilityList {
       list-style: none;
@@ -39,7 +41,11 @@
 <body>
   <header>
     <h2>Loaded Workers</h2>
-    <button id="addWorkerBtn">➕ Add Worker</button>
+    <div>
+      <input type="file" id="excelInput" accept=".xlsx,.xls" style="display:none">
+      <button id="uploadExcelBtn">📂 Upload Excel</button>
+      <button id="addWorkerBtn">➕ Add Worker</button>
+    </div>
   </header>
 
   <ul id="facilityList"></ul>
@@ -58,9 +64,7 @@
   </div>
 
   <script>
-    const socket = io(); // connect to server
-
-    // --- Initialize map ---
+    const socket = io();
     const map = L.map('map').setView([39.8283, -98.5795], 4);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '© OpenStreetMap contributors'
@@ -68,52 +72,63 @@
 
     const markers = [];
 
-    // --- Popup logic ---
-    document.getElementById("addWorkerBtn").addEventListener("click", () => {
+    // --- popup logic ---
+    document.getElementById("addWorkerBtn").onclick = () =>
       document.getElementById("addWorkerPopup").style.display = "block";
-    });
-    document.getElementById("cancelWorkerBtn").addEventListener("click", () => {
+    document.getElementById("cancelWorkerBtn").onclick = () =>
       document.getElementById("addWorkerPopup").style.display = "none";
-    });
 
-    // --- Add worker locally and emit event ---
-    document.getElementById("saveWorkerBtn").addEventListener("click", async () => {
+    // --- save new worker ---
+    document.getElementById("saveWorkerBtn").onclick = async () => {
       const name = document.getElementById("workerName").value.trim();
       const address = document.getElementById("workerAddress").value.trim();
-      if (!name || !address) {
-        alert("Please enter both name and address");
-        return;
-      }
-
+      if (!name || !address) return alert("Please enter both fields");
       addWorker({ name, address });
       socket.emit("addWorker", { name, address });
-
       document.getElementById("addWorkerPopup").style.display = "none";
       document.getElementById("workerName").value = "";
       document.getElementById("workerAddress").value = "";
+    };
+
+    // --- Excel upload ---
+    document.getElementById("uploadExcelBtn").onclick = () =>
+      document.getElementById("excelInput").click();
+
+    document.getElementById("excelInput").addEventListener("change", (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        const data = new Uint8Array(evt.target.result);
+        const workbook = XLSX.read(data, { type: "array" });
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        const json = XLSX.utils.sheet_to_json(sheet);
+        json.forEach(row => {
+          const name = row.Name || row.name;
+          const address = row.Address || row.address;
+          if (name && address) {
+            addWorker({ name, address });
+            socket.emit("addWorker", { name, address });
+          }
+        });
+      };
+      reader.readAsArrayBuffer(file);
+      e.target.value = ""; // reset input
     });
 
-    // --- Socket events ---
-    socket.on("loadWorkers", (workers) => {
-      workers.forEach(w => addWorker(w));
-    });
-    socket.on("workerAdded", (worker) => {
-      addWorker(worker);
-    });
-    socket.on("workerDeleted", (worker) => {
-      removeWorker(worker);
-    });
+    // --- sockets ---
+    socket.on("loadWorkers", (workers) => workers.forEach(addWorker));
+    socket.on("workerAdded", addWorker);
+    socket.on("workerDeleted", removeWorker);
 
-    // --- Functions ---
+    // --- functions ---
     async function addWorker(worker) {
       if (document.querySelector(`li[data-name="${worker.name}"][data-address="${worker.address}"]`)) return;
-
       const list = document.getElementById("facilityList");
-      const item = document.createElement("li");
-      item.dataset.name = worker.name;
-      item.dataset.address = worker.address;
-      item.textContent = `${worker.name} — ${worker.address}`;
-
+      const li = document.createElement("li");
+      li.dataset.name = worker.name;
+      li.dataset.address = worker.address;
+      li.textContent = `${worker.name} — ${worker.address}`;
       const delBtn = document.createElement("button");
       delBtn.textContent = "❌";
       delBtn.style.marginLeft = "10px";
@@ -121,30 +136,28 @@
         socket.emit("deleteWorker", worker);
         removeWorker(worker);
       };
-      item.appendChild(delBtn);
-      list.appendChild(item);
+      li.appendChild(delBtn);
+      list.appendChild(li);
 
       try {
         const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(worker.address)}`);
         const data = await res.json();
         if (data.length > 0) {
-          const lat = data[0].lat;
-          const lon = data[0].lon;
-          const marker = L.marker([lat, lon]).addTo(map).bindPopup(`<b>${worker.name}</b><br>${worker.address}`);
+          const { lat, lon } = data[0];
+          const marker = L.marker([lat, lon]).addTo(map)
+            .bindPopup(`<b>${worker.name}</b><br>${worker.address}`);
           markers.push({ ...worker, marker });
           map.setView([lat, lon], 10);
         }
-      } catch (err) {
-        console.error("Address lookup failed:", err);
+      } catch (e) {
+        console.error("Address lookup failed", e);
       }
     }
 
     function removeWorker(worker) {
-      const list = document.getElementById("facilityList");
-      const item = document.querySelector(`li[data-name="${worker.name}"][data-address="${worker.address}"]`);
-      if (item) list.removeChild(item);
-
-      const m = markers.find((x) => x.name === worker.name && x.address === worker.address);
+      const li = document.querySelector(`li[data-name="${worker.name}"][data-address="${worker.address}"]`);
+      if (li) li.remove();
+      const m = markers.find(x => x.name === worker.name && x.address === worker.address);
       if (m) map.removeLayer(m.marker);
     }
   </script>
