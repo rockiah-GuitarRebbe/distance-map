@@ -1,268 +1,152 @@
 <!DOCTYPE html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <title>Facility Distance Viewer (with Estimated Drive Time)</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <style>
-      :root { --brand:#3f51b5; }
-      body { font-family: Arial, sans-serif; margin: 0; padding: 0; background: #f5f5f5; }
-      h2 { background: var(--brand); color: #fff; padding: 10px 14px; margin: 0; }
-      #layout { display: grid; grid-template-columns: 360px 1fr; gap: 10px; }
-      #left {
-        background:#fff; margin:10px; border-radius:10px; box-shadow:0 2px 6px rgba(0,0,0,.1);
-        padding:12px; height: calc(100vh - 70px); overflow:auto;
-      }
-      #right { margin:10px; }
-      #map { height: calc(100vh - 70px); width: 100%; border-radius:10px; box-shadow:0 2px 6px rgba(0,0,0,.1); }
-      .section-title { font-weight:bold; margin:10px 0 6px; color:#333; }
-      .row { display:flex; gap:8px; }
-      input[type="file"]{ width:100%; }
-      input[type="text"]{ flex:1; padding:10px; border:1px solid #ddd; border-radius:8px; }
-      button {
-        padding:10px 12px; border:none; border-radius:8px; cursor:pointer;
-        background: var(--brand); color:#fff; font-weight:600;
-      }
-      button.secondary { background:#e0e0e0; color:#333; }
-      #loadedList, #sortedList {
-        font-size:14px; line-height:1.4; background:#fafafa; border:1px solid #eee;
-        border-radius:8px; padding:8px; max-height:240px; overflow:auto;
-      }
-      .closest { background:#fff7e6; border-left:4px solid #f5a623; padding-left:8px; border-radius:6px; }
-      .muted { color:#666; }
-    </style>
-  </head>
-  <body>
-    <h2>📍 Facility Distance Viewer (Estimated Driving Time)</h2>
-    <div id="layout">
-      <div id="left">
-        <div class="section-title">Upload facilities (Excel: <em>name</em>, <em>address</em>)</div>
-        <input type="file" id="fileInput" accept=".xlsx, .xls" />
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Distance Map — Workers (Live)</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <style>
+    body {
+      font-family: system-ui, Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+    }
+    header {
+      padding: 10px;
+      background: #f3f3f3;
+      border-bottom: 1px solid #ddd;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    #facilityList {
+      list-style: none;
+      padding: 10px;
+      margin: 0;
+    }
+    #facilityList li {
+      margin-bottom: 5px;
+      border-bottom: 1px solid #eee;
+      padding: 5px 0;
+    }
+    #map {
+      height: 80vh;
+      width: 100%;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h2>Loaded Workers</h2>
+    <button id="addWorkerBtn">➕ Add Worker</button>
+  </header>
 
-        <div class="section-title">Worker search</div>
-        <div class="row" style="margin-bottom:8px;">
-          <input type="text" id="workerInput" placeholder="Enter worker address (e.g., 90210 or 15 Summit Ave, Monsey, NY)" />
-          <button id="findBtn">Find Closest</button>
-        </div>
-        <div class="row" style="margin-bottom:12px;">
-          <button id="clearBtn" class="secondary">Clear Map</button>
-        </div>
+  <ul id="facilityList"></ul>
+  <div id="map"></div>
 
-        <div class="section-title">Loaded facilities</div>
-        <div id="loadedList" class="muted">No file loaded yet.</div>
+  <!-- Add Worker Popup -->
+  <div id="addWorkerPopup" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
+   background:#fff; border:2px solid #ccc; border-radius:10px; padding:20px; box-shadow:0 4px 10px rgba(0,0,0,0.2); z-index:9999;">
+    <h3>Add Worker</h3>
+    <label>Name:</label><br>
+    <input id="workerName" placeholder="Enter name" style="width:250px;"><br><br>
+    <label>Address:</label><br>
+    <input id="workerAddress" placeholder="Enter address" style="width:250px;"><br><br>
+    <button id="saveWorkerBtn">Add</button>
+    <button id="cancelWorkerBtn">Cancel</button>
+  </div>
 
-        <div class="section-title">Results (shortest drive → longest)</div>
-        <div id="sortedList" class="muted">Enter a worker address to see distances.</div>
-      </div>
+  <script>
+    const socket = io(); // connect to server
 
-      <div id="right">
-        <div id="map"></div>
-      </div>
-    </div>
+    // --- Initialize map ---
+    const map = L.map('map').setView([39.8283, -98.5795], 4);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap contributors'
+    }).addTo(map);
 
-    <script>
-      let map;
-      let allFacilities = [];
-      let workerMarker = null;
-      let closestHalo = null;
+    const markers = [];
 
-      function initMap() {
-        map = L.map("map").setView([39.8283, -98.5795], 5);
-        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-          maxZoom: 18,
-          attribution: "&copy; OpenStreetMap contributors",
-        }).addTo(map);
-      }
+    // --- Popup logic ---
+    document.getElementById("addWorkerBtn").addEventListener("click", () => {
+      document.getElementById("addWorkerPopup").style.display = "block";
+    });
+    document.getElementById("cancelWorkerBtn").addEventListener("click", () => {
+      document.getElementById("addWorkerPopup").style.display = "none";
+    });
 
-      // ===== FILE HANDLING =====
-      document.getElementById("fileInput").addEventListener("change", handleFile);
-      function handleFile(event) {
-        const file = event.target.files[0];
-        if (!file) return;
-        clearMap(true);
-
-        const reader = new FileReader();
-        reader.onload = function (e) {
-          const data = new Uint8Array(e.target.result);
-          const workbook = XLSX.read(data, { type: "array" });
-          const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-          const rows = XLSX.utils.sheet_to_json(firstSheet);
-
-          allFacilities = rows.map(r => ({ name: r.name || "Unnamed", address: r.address || "" }));
-
-          document.getElementById("loadedList").innerHTML =
-            `Loaded ${allFacilities.length} facilities:<br>` +
-            allFacilities.map(f => `${f.name} — ${f.address}`).join("<br>");
-
-          showFacilitiesOnMap();
-        };
-        reader.readAsArrayBuffer(file);
+    // --- Add worker locally and emit event ---
+    document.getElementById("saveWorkerBtn").addEventListener("click", async () => {
+      const name = document.getElementById("workerName").value.trim();
+      const address = document.getElementById("workerAddress").value.trim();
+      if (!name || !address) {
+        alert("Please enter both name and address");
+        return;
       }
 
-      // ===== GEOCODER (Photon, free) =====
-     async function geocodeAddress(address) {
-  // 🧹 Clean up and normalize addresses before searching
-  let cleaned = address
-    .replace(/\s+/g, " ")                   // collapse multiple spaces
-    .replace(/,+/g, ",")                    // remove double commas
-    .replace(/\bUSA\b/gi, "United States")  // expand country name
-    .replace(/\bRd\b/gi, "Road")
-    .replace(/\bAve\b/gi, "Avenue")
-    .replace(/\bBlvd\b/gi, "Boulevard")
-    .replace(/\bCt\b/gi, "Court")
-    .replace(/\bDr\b/gi, "Drive")
-    .replace(/\bLn\b/gi, "Lane")
-    .replace(/\bSt\b/gi, "Street")
-    .replace(/\bVA\b(?!\w)/gi, "Virginia")  // make states explicit
-    .replace(/\bNC\b(?!\w)/gi, "North Carolina")
-    .replace(/\bMD\b(?!\w)/gi, "Maryland")
-    .replace(/\bPA\b(?!\w)/gi, "Pennsylvania")
-    .replace(/\bNY\b(?!\w)/gi, "New York")
-    .replace(/\bMA\b(?!\w)/gi, "Massachusetts")
-    .replace(/\bCA\b(?!\w)/gi, "California")
-    + ", United States";
+      addWorker({ name, address });
+      socket.emit("addWorker", { name, address });
 
-  async function fetchPhoton(query) {
-    const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(query)}&limit=1`;
-    const resp = await fetch(url);
-    return resp.json();
-  }
+      document.getElementById("addWorkerPopup").style.display = "none";
+      document.getElementById("workerName").value = "";
+      document.getElementById("workerAddress").value = "";
+    });
 
-  try {
-    // 🔍 1️⃣ Full address
-    let data = await fetchPhoton(cleaned);
-    if (data?.features?.length > 0) {
-      const [lng, lat] = data.features[0].geometry.coordinates;
-      return [lat, lng];
+    // --- Socket events ---
+    socket.on("loadWorkers", (workers) => {
+      workers.forEach(w => addWorker(w));
+    });
+    socket.on("workerAdded", (worker) => {
+      addWorker(worker);
+    });
+    socket.on("workerDeleted", (worker) => {
+      removeWorker(worker);
+    });
+
+    // --- Functions ---
+    async function addWorker(worker) {
+      if (document.querySelector(`li[data-name="${worker.name}"][data-address="${worker.address}"]`)) return;
+
+      const list = document.getElementById("facilityList");
+      const item = document.createElement("li");
+      item.dataset.name = worker.name;
+      item.dataset.address = worker.address;
+      item.textContent = `${worker.name} — ${worker.address}`;
+
+      const delBtn = document.createElement("button");
+      delBtn.textContent = "❌";
+      delBtn.style.marginLeft = "10px";
+      delBtn.onclick = () => {
+        socket.emit("deleteWorker", worker);
+        removeWorker(worker);
+      };
+      item.appendChild(delBtn);
+      list.appendChild(item);
+
+      try {
+        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(worker.address)}`);
+        const data = await res.json();
+        if (data.length > 0) {
+          const lat = data[0].lat;
+          const lon = data[0].lon;
+          const marker = L.marker([lat, lon]).addTo(map).bindPopup(`<b>${worker.name}</b><br>${worker.address}`);
+          markers.push({ ...worker, marker });
+          map.setView([lat, lon], 10);
+        }
+      } catch (err) {
+        console.error("Address lookup failed:", err);
+      }
     }
 
-    // 🔍 2️⃣ Simplified (strip house number)
-    const simplified = cleaned.replace(/^\d+\s*/, "");
-    data = await fetchPhoton(simplified);
-    if (data?.features?.length > 0) {
-      const [lng, lat] = data.features[0].geometry.coordinates;
-      return [lat, lng];
+    function removeWorker(worker) {
+      const list = document.getElementById("facilityList");
+      const item = document.querySelector(`li[data-name="${worker.name}"][data-address="${worker.address}"]`);
+      if (item) list.removeChild(item);
+
+      const m = markers.find((x) => x.name === worker.name && x.address === worker.address);
+      if (m) map.removeLayer(m.marker);
     }
-
-    // 🔍 3️⃣ City-level fallback
-    const parts = cleaned.split(/[, ]+/);
-    const stateZip = parts.slice(-2).join(" ");
-    const cityOnly = parts.slice(-3, -1).join(" ");
-    const fallback = `${cityOnly} ${stateZip}, United States`;
-    data = await fetchPhoton(fallback);
-    if (data?.features?.length > 0) {
-      const [lng, lat] = data.features[0].geometry.coordinates;
-      return [lat, lng];
-    }
-  } catch (e) {
-    console.warn("Geocoding failed for:", address);
-  }
-
-  return null;
-}
-
-
-      async function showFacilitiesOnMap() {
-        for (let i = 0; i < allFacilities.length; i++) {
-          const f = allFacilities[i];
-          const coords = await geocodeAddress(f.address);
-          if (coords) {
-            f.coords = coords;
-            f.marker = L.marker(coords).addTo(map).bindPopup(`<b>${f.name}</b><br>${f.address}`);
-          } else {
-            f.coords = null;
-          }
-          await new Promise(r => setTimeout(r, 800));
-        }
-        const group = L.featureGroup(allFacilities.filter(x => x.coords).map(x => x.marker));
-        if (group.getLayers().length) map.fitBounds(group.getBounds().pad(0.2));
-      }
-
-      // ===== WORKER SEARCH =====
-      document.getElementById("findBtn").addEventListener("click", onFindClosest);
-      document.getElementById("workerInput").addEventListener("keydown", e => {
-        if (e.key === "Enter") onFindClosest();
-      });
-
-      async function onFindClosest() {
-        const addr = document.getElementById("workerInput").value.trim();
-        if (!addr) return;
-
-        const workerCoords = await geocodeAddress(addr);
-        const listEl = document.getElementById("sortedList");
-
-        if (!workerCoords) {
-          listEl.innerHTML = `<span class="muted">Could not locate: ${addr}</span>`;
-          return;
-        }
-
-        if (workerMarker) map.removeLayer(workerMarker);
-        workerMarker = L.circleMarker(workerCoords, { radius: 8, weight: 2, color: "#f03", fillOpacity: 0.5 })
-          .addTo(map)
-          .bindPopup(`<b>Worker</b><br>${addr}`)
-          .openPopup();
-        map.setView(workerCoords, 9);
-
-        const withCoords = allFacilities.filter(f => Array.isArray(f.coords));
-        if (withCoords.length === 0) {
-          listEl.innerHTML = `<span class="muted">No geocoded facilities to compare yet.</span>`;
-          return;
-        }
-
-        // Calculate straight-line distance + estimated drive distance/time
-        const distances = withCoords.map(f => {
-          const km = haversine(workerCoords[0], workerCoords[1], f.coords[0], f.coords[1]);
-          const mi = km * 0.621371;
-          const drivingMi = mi * 1.3;               // assume 30% longer by roads
-          const drivingTimeHr = drivingMi / 40.0;   // assume avg 40 mph
-          const driveMins = drivingTimeHr * 60;
-          return { name: f.name, address: f.address, km, mi, drivingMi, driveMins, marker: f.marker, coords: f.coords };
-        }).sort((a, b) => a.driveMins - b.driveMins);
-
-        // Highlight closest
-        if (closestHalo) map.removeLayer(closestHalo);
-        closestHalo = L.circle(distances[0].coords, { radius: 250, color: "#f5a623", weight: 3, fillOpacity: 0.1 }).addTo(map);
-        distances[0].marker.openPopup();
-
-        // Display sorted list
-        const workerLine = `<div class="muted" style="margin-bottom:6px;">From worker: <b>${addr}</b></div>`;
-        const rows = distances.map((d, i) => {
-          const cls = i === 0 ? 'class="closest"' : "";
-          const hrs = Math.floor(d.driveMins / 60);
-          const mins = Math.round(d.driveMins % 60);
-          const timeTxt = hrs > 0 ? `${hrs} hr ${mins} min` : `${mins} min`;
-          return `<div ${cls} style="margin:6px 0; padding:6px;">
-                    <div><b>${i + 1}. ${d.name}</b></div>
-                    <div>${d.address}</div>
-                    <div class="muted">~${d.drivingMi.toFixed(1)} mi — est. ${timeTxt} drive</div>
-                  </div>`;
-        }).join("");
-        listEl.innerHTML = workerLine + rows;
-      }
-
-      // Haversine formula (km)
-      function haversine(lat1, lon1, lat2, lon2) {
-        const R = 6371, toRad = x => x * Math.PI / 180;
-        const dLat = toRad(lat2 - lat1);
-        const dLon = toRad(lon2 - lon1);
-        const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;
-        return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
-      }
-
-      // Clear map
-      document.getElementById("clearBtn").addEventListener("click", () => clearMap(false));
-      function clearMap(keepFacilitiesList) {
-        allFacilities.forEach(f => { if (f.marker) map.removeLayer(f.marker); });
-        allFacilities.forEach(f => { f.marker = null; f.coords = null; });
-        if (workerMarker) { map.removeLayer(workerMarker); workerMarker = null; }
-        if (closestHalo) { map.removeLayer(closestHalo); closestHalo = null; }
-        document.getElementById("sortedList").innerHTML = '<span class="muted">Enter a worker address to see distances.</span>';
-        if (!keepFacilitiesList) document.getElementById("loadedList").innerHTML = 'No file loaded yet.';
-      }
-
-      initMap();
-    </script>
-  </body>
+  </script>
+</body>
 </html>
