@@ -2,40 +2,20 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Distance Map — Workers + Excel</title>
+  <title>Distance Map — Workers + Excel (USA Fix)</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <style>
-    body {
-      font-family: system-ui, Arial, sans-serif;
-      margin: 0;
-      padding: 0;
-    }
+    body {font-family: system-ui, Arial, sans-serif; margin: 0;}
     header {
-      padding: 10px;
-      background: #f3f3f3;
-      border-bottom: 1px solid #ddd;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 8px;
+      padding: 10px; background: #f3f3f3; border-bottom: 1px solid #ddd;
+      display: flex; justify-content: space-between; align-items: center; gap: 8px;
     }
-    #facilityList {
-      list-style: none;
-      padding: 10px;
-      margin: 0;
-    }
-    #facilityList li {
-      margin-bottom: 5px;
-      border-bottom: 1px solid #eee;
-      padding: 5px 0;
-    }
-    #map {
-      height: 80vh;
-      width: 100%;
-    }
+    #facilityList {list-style: none; padding: 10px; margin: 0;}
+    #facilityList li {margin-bottom: 5px; border-bottom: 1px solid #eee; padding: 5px 0;}
+    #map {height: 80vh; width: 100%;}
   </style>
 </head>
 <body>
@@ -83,8 +63,9 @@
       const name = document.getElementById("workerName").value.trim();
       const address = document.getElementById("workerAddress").value.trim();
       if (!name || !address) return alert("Please enter both fields");
-      addWorker({ name, address });
-      socket.emit("addWorker", { name, address });
+      const worker = { name, address: address + ", USA" };
+      addWorker(worker);
+      socket.emit("addWorker", worker);
       document.getElementById("addWorkerPopup").style.display = "none";
       document.getElementById("workerName").value = "";
       document.getElementById("workerAddress").value = "";
@@ -103,18 +84,24 @@
         const workbook = XLSX.read(data, { type: "array" });
         const sheet = workbook.Sheets[workbook.SheetNames[0]];
         const json = XLSX.utils.sheet_to_json(sheet);
-        json.forEach(row => {
-          const name = row.Name || row.name;
-          const address = row.Address || row.address;
-          if (name && address) {
-            addWorker({ name, address });
-            socket.emit("addWorker", { name, address });
-          }
-        });
+        uploadRows(json);
       };
       reader.readAsArrayBuffer(file);
-      e.target.value = ""; // reset input
+      e.target.value = "";
     });
+
+    async function uploadRows(rows) {
+      for (const row of rows) {
+        const name = row.Name || row.name;
+        const address = row.Address || row.address;
+        if (name && address) {
+          const worker = { name, address: address + ", USA" };
+          addWorker(worker);
+          socket.emit("addWorker", worker);
+          await new Promise(r => setTimeout(r, 1000)); // 1 sec delay
+        }
+      }
+    }
 
     // --- sockets ---
     socket.on("loadWorkers", (workers) => workers.forEach(addWorker));
@@ -140,8 +127,7 @@
       list.appendChild(li);
 
       try {
-       const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(worker.address + ', USA')}`);
-
+        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(worker.address)}`);
         const data = await res.json();
         if (data.length > 0) {
           const { lat, lon } = data[0];
@@ -164,4 +150,3 @@
   </script>
 </body>
 </html>
-
