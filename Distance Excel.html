@@ -24,7 +24,7 @@
     }
 
     .sidebar {
-      flex: 0 0 20%;
+      flex: 0 0 22%;
       min-width: 260px;
       max-width: 400px;
       height: 100vh;
@@ -73,7 +73,6 @@
       color: white;
       font-size: 14px;
     }
-
     button:hover { background: #005fa3; }
 
     #addWorkerPopup {
@@ -88,6 +87,13 @@
       padding: 20px;
       box-shadow: 0 4px 10px rgba(0,0,0,0.3);
       z-index: 9999;
+    }
+
+    #distanceResults {
+      padding: 10px;
+      font-size: 14px;
+      overflow-y: auto;
+      max-height: 200px;
     }
   </style>
 </head>
@@ -110,9 +116,8 @@
              style="width:90%; padding:6px;" />
       <button id="therapistBtn">📍 Show</button>
     </div>
-<div id="distanceResults" style="padding:10px; font-size:14px; overflow-y:auto; max-height:200px;">
-  <i>No therapist selected.</i>
-</div>
+
+    <div id="distanceResults"><i>No therapist selected.</i></div>
 
     <ul id="facilityList"></ul>
   </div>
@@ -218,8 +223,7 @@
         list.appendChild(li);
 
         try {
-         const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&countrycodes=us&q=${encodeURIComponent(query)}`);
-
+          const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&countrycodes=us&limit=1&q=${encodeURIComponent(worker.address)}`);
           const data = await res.json();
           if (data.length > 0) {
             const { lat, lon } = data[0];
@@ -256,10 +260,9 @@
       document.getElementById("therapistBtn").addEventListener("click", async () => {
         const query = document.getElementById("therapistInput").value.trim();
         if (!query) return alert("Enter a city, ZIP, or address");
-        console.log("Therapist button clicked:", query);
 
         try {
-          const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}`);
+          const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&countrycodes=us&limit=1&q=${encodeURIComponent(query)}`);
           const data = await res.json();
           if (!data.length) return alert("Address not found");
 
@@ -279,27 +282,21 @@
 
           const R = 6371;
           const deg2rad = d => d * Math.PI / 180;
-         let msg = `<b>From ${display_name}</b><br><br>`;
-let listHtml = `<b>Distances from ${display_name}:</b><br><br>`;
+          let listHtml = `<b>Distances from ${display_name}:</b><br><br>`;
 
-for (const m of markers) {
-  const lat1 = pos[0], lon1 = pos[1];
-  const lat2 = m.marker.getLatLng().lat;
-  const lon2 = m.marker.getLatLng().lng;
-  const dLat = deg2rad(lat2 - lat1);
-  const dLon = deg2rad(lon2 - lon1);
-  const a = Math.sin(dLat/2)**2 + Math.cos(deg2rad(lat1))*Math.cos(deg2rad(lat2))*Math.sin(dLon/2)**2;
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-  const dist = (R * c).toFixed(1);
-  listHtml += `${m.name} — <b>${dist} km</b><br>`;
-}
+          for (const m of markers) {
+            const lat1 = pos[0], lon1 = pos[1];
+            const lat2 = m.marker.getLatLng().lat;
+            const lon2 = m.marker.getLatLng().lng;
+            const dLat = deg2rad(lat2 - lat1);
+            const dLon = deg2rad(lon2 - lon1);
+            const a = Math.sin(dLat/2)**2 + Math.cos(deg2rad(lat1))*Math.cos(deg2rad(lat2))*Math.sin(dLon/2)**2;
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+            const dist = (R * c).toFixed(1);
+            listHtml += `${m.name} — <b>${dist} km</b><br>`;
+          }
 
-// show on sidebar
-document.getElementById("distanceResults").innerHTML = listHtml;
-
-// still keep a short popup
-therapistMarker.bindPopup(`Therapist: ${display_name}`).openPopup();
-
+          document.getElementById("distanceResults").innerHTML = listHtml;
         } catch (err) {
           console.error("Therapist search failed", err);
           alert("Search failed — try again.");
@@ -309,5 +306,3 @@ therapistMarker.bindPopup(`Therapist: ${display_name}`).openPopup();
   </script>
 </body>
 </html>
-
-
