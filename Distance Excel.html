@@ -29,5 +29,15 @@
       }).addTo(map);
     });
   </script>
+  <script>
+  console.log("✅ Page loaded, running script");
+  if (typeof L === "undefined") {
+    console.error("❌ Leaflet not loaded");
+  } else {
+    console.log("✅ Leaflet version:", L.version);
+  }
+</script>
+
 </body>
 </html>
+
