@@ -98,6 +98,7 @@
   <script>
     const socket = io();
     const map = L.map('map').setView([39.8283, -98.5795], 4);
+    setTimeout(() => map.invalidateSize(), 500);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '© OpenStreetMap contributors'
     }).addTo(map);
@@ -116,3 +117,4 @@
       const address = document.getElementById("workerAddress").value.trim();
       if (!name || !address) return alert("Please enter both fields");
       const worker = { name,
+
