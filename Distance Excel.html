@@ -2,45 +2,112 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Distance Map — Workers + Excel (USA Fix)</title>
+  <title>Distance Map — Beautiful Layout</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <style>
-    body {font-family: system-ui, Arial, sans-serif; margin: 0;}
-    header {
-      padding: 10px; background: #f3f3f3; border-bottom: 1px solid #ddd;
-      display: flex; justify-content: space-between; align-items: center; gap: 8px;
+    body {
+      font-family: system-ui, Arial, sans-serif;
+      margin: 0;
+      height: 100vh;
+      display: grid;
+      grid-template-columns: 30% 70%;
     }
-    #facilityList {list-style: none; padding: 10px; margin: 0;}
-    #facilityList li {margin-bottom: 5px; border-bottom: 1px solid #eee; padding: 5px 0;}
-    #map {height: 80vh; width: 100%;}
+
+    /* Left panel (list + buttons) */
+    .sidebar {
+      display: flex;
+      flex-direction: column;
+      border-right: 1px solid #ddd;
+      background: #f8f8f8;
+      height: 100vh;
+    }
+
+    header {
+      padding: 10px;
+      border-bottom: 1px solid #ddd;
+      background: #fafafa;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+    }
+
+    #facilityList {
+      list-style: none;
+      margin: 0;
+      padding: 10px;
+      overflow-y: auto;
+      flex: 1;
+    }
+
+    #facilityList li {
+      margin-bottom: 6px;
+      border-bottom: 1px solid #eee;
+      padding-bottom: 4px;
+    }
+
+    #map {
+      height: 100vh;
+      width: 100%;
+    }
+
+    button {
+      cursor: pointer;
+      border: none;
+      border-radius: 6px;
+      padding: 6px 10px;
+      background: #0078d4;
+      color: white;
+      font-size: 14px;
+    }
+
+    button:hover {
+      background: #005fa3;
+    }
+
+    #addWorkerPopup {
+      display: none;
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: #fff;
+      border: 2px solid #ccc;
+      border-radius: 10px;
+      padding: 20px;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+      z-index: 9999;
+    }
   </style>
 </head>
 <body>
-  <header>
-    <h2>Loaded Workers</h2>
-    <div>
-      <input type="file" id="excelInput" accept=".xlsx,.xls" style="display:none">
-      <button id="uploadExcelBtn">📂 Upload Excel</button>
-      <button id="addWorkerBtn">➕ Add Worker</button>
-    </div>
-  </header>
+  <div class="sidebar">
+    <header>
+      <h3>Loaded Workers</h3>
+      <div>
+        <input type="file" id="excelInput" accept=".xlsx,.xls" style="display:none">
+        <button id="uploadExcelBtn">📂 Excel</button>
+        <button id="addWorkerBtn">➕ Add</button>
+      </div>
+    </header>
 
-  <ul id="facilityList"></ul>
+    <ul id="facilityList"></ul>
+  </div>
+
   <div id="map"></div>
 
   <!-- Add Worker Popup -->
-  <div id="addWorkerPopup" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
-   background:#fff; border:2px solid #ccc; border-radius:10px; padding:20px; box-shadow:0 4px 10px rgba(0,0,0,0.2); z-index:9999;">
+  <div id="addWorkerPopup">
     <h3>Add Worker</h3>
     <label>Name:</label><br>
     <input id="workerName" placeholder="Enter name" style="width:250px;"><br><br>
     <label>Address:</label><br>
     <input id="workerAddress" placeholder="Enter address" style="width:250px;"><br><br>
     <button id="saveWorkerBtn">Add</button>
-    <button id="cancelWorkerBtn">Cancel</button>
+    <button id="cancelWorkerBtn" style="background:#aaa;">Cancel</button>
   </div>
 
   <script>
@@ -98,7 +165,7 @@
           const worker = { name, address: address + ", USA" };
           addWorker(worker);
           socket.emit("addWorker", worker);
-          await new Promise(r => setTimeout(r, 1000)); // 1 sec delay
+          await new Promise(r => setTimeout(r, 1000));
         }
       }
     }
@@ -134,7 +201,7 @@
           const marker = L.marker([lat, lon]).addTo(map)
             .bindPopup(`<b>${worker.name}</b><br>${worker.address}`);
           markers.push({ ...worker, marker });
-          map.setView([lat, lon], 10);
+          map.setView([lat, lon], 8);
         }
       } catch (e) {
         console.error("Address lookup failed", e);
