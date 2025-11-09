@@ -7,7 +7,6 @@
   <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-
   <style>
     html, body {
       height: 100%;
@@ -16,13 +15,11 @@
       padding: 0;
       font-family: system-ui, Arial, sans-serif;
     }
-
     body {
       display: flex;
       flex-direction: row;
       overflow: hidden;
     }
-
     .sidebar {
       flex: 0 0 22%;
       min-width: 260px;
@@ -33,7 +30,6 @@
       display: flex;
       flex-direction: column;
     }
-
     header {
       padding: 10px;
       border-bottom: 1px solid #ddd;
@@ -43,7 +39,6 @@
       align-items: center;
       gap: 8px;
     }
-
     #facilityList {
       list-style: none;
       margin: 0;
@@ -51,19 +46,16 @@
       overflow-y: auto;
       flex: 1;
     }
-
     #facilityList li {
       margin-bottom: 6px;
       border-bottom: 1px solid #eee;
       padding-bottom: 4px;
     }
-
     #map {
       flex: 1 1 auto;
       height: 100vh;
       width: 100%;
     }
-
     button {
       cursor: pointer;
       border: none;
@@ -73,9 +65,7 @@
       color: white;
       font-size: 14px;
     }
-
     button:hover { background: #005fa3; }
-
     #addWorkerPopup {
       display: none;
       position: fixed;
@@ -89,7 +79,6 @@
       box-shadow: 0 4px 10px rgba(0,0,0,0.3);
       z-index: 9999;
     }
-
     #distanceResults {
       padding: 10px;
       font-size: 14px;
@@ -98,7 +87,6 @@
     }
   </style>
 </head>
-
 <body>
   <div class="sidebar">
     <header>
@@ -114,13 +102,14 @@
     <!-- Therapist search box -->
     <div style="padding:10px; border-bottom:1px solid #ddd;">
       <label><b>Therapist Location:</b></label><br />
-      <input id="therapistInput" placeholder="Enter city, ZIP, or address"
-             style="width:90%; padding:6px;" />
-      <button id="therapistBtn">📍 Show</button>
+      <input id="therapistInput" placeholder="Enter city, ZIP, or address" style="width:90%; padding:6px;" />
+      <div style="margin-top:6px; display:flex; gap:5px;">
+        <button id="therapistBtn">📍 Show</button>
+        <button id="clearTherapistBtn" style="background:#888;">🧍‍♀️ Clear Therapist</button>
+      </div>
     </div>
 
     <div id="distanceResults"><i>No therapist selected.</i></div>
-
     <ul id="facilityList"></ul>
   </div>
 
@@ -190,10 +179,7 @@
       async function uploadRows(rows) {
         cancelUpload = false;
         for (const row of rows) {
-          if (cancelUpload) {
-            console.log("⛔ Upload canceled mid-process.");
-            break;
-          }
+          if (cancelUpload) break;
           const keys = Object.keys(row);
           if (keys.length < 2) continue;
           const name = row[keys[0]];
@@ -208,10 +194,6 @@
         fitAllMarkers();
       }
 
-      socket.on("loadWorkers", (workers) => workers.forEach(w => addWorker(w, false)));
-      socket.on("workerAdded", (worker) => addWorker(worker, false));
-      socket.on("workerDeleted", removeWorker);
-
       async function addWorker(worker, scrollToMarker) {
         if (cancelUpload) return;
         if (document.querySelector(`li[data-name="${worker.name}"][data-address="${worker.address}"]`)) return;
@@ -224,10 +206,7 @@
         const delBtn = document.createElement("button");
         delBtn.textContent = "❌";
         delBtn.style.marginLeft = "10px";
-        delBtn.onclick = () => {
-          socket.emit("deleteWorker", worker);
-          removeWorker(worker);
-        };
+        delBtn.onclick = () => removeWorker(worker);
         li.appendChild(delBtn);
         list.prepend(li);
 
@@ -237,8 +216,7 @@
           if (cancelUpload) return;
           if (data.length > 0) {
             const { lat, lon } = data[0];
-            const marker = L.marker([lat, lon]).addTo(map)
-              .bindPopup(`<b>${worker.name}</b><br>${worker.address}`);
+            const marker = L.marker([lat, lon]).addTo(map).bindPopup(`<b>${worker.name}</b><br>${worker.address}`);
             markers.push({ ...worker, marker });
             if (scrollToMarker) map.setView([lat, lon], 8);
             fitAllMarkers();
@@ -259,26 +237,30 @@
         }
       }
 
-      // 🧹 Clear all workers + therapist, stop upload
+      // 🧹 Clear all workers + therapist
       document.getElementById("clearListBtn").addEventListener("click", () => {
         if (!confirm("Clear all loaded workers and therapist marker?")) return;
-
         cancelUpload = true;
         document.getElementById("excelInput").value = "";
-
         document.getElementById("facilityList").innerHTML = "";
-
         for (const m of markers) map.removeLayer(m.marker);
         markers.length = 0;
-
         if (therapistMarker) {
           map.removeLayer(therapistMarker);
           therapistMarker = null;
         }
-
         document.getElementById("distanceResults").innerHTML = "<i>No therapist selected.</i>";
-        document.getElementById("therapistInput").value = ""; // ✅ clear therapist ZIP box
+        document.getElementById("therapistInput").value = "";
         map.setView([39.8283, -98.5795], 4);
+      });
+
+      // 🧍‍♀️ Clear only therapist
+      document.getElementById("clearTherapistBtn").addEventListener("click", () => {
+        if (!therapistMarker) return;
+        map.removeLayer(therapistMarker);
+        therapistMarker = null;
+        document.getElementById("therapistInput").value = "";
+        document.getElementById("distanceResults").innerHTML = "<i>No therapist selected.</i>";
       });
 
       function fitAllMarkers() {
@@ -287,29 +269,23 @@
         map.fitBounds(group.getBounds().pad(0.3));
       }
 
-      // 🩵 Therapist search
+      // 📍 Therapist search (sorted distances)
       document.getElementById("therapistBtn").addEventListener("click", async () => {
         const input = document.getElementById("therapistInput");
         let query = input.value.trim();
-
         if (!query) {
           alert("Please enter a ZIP code or full U.S. address.");
           input.style.border = "2px solid red";
           setTimeout(() => (input.style.border = ""), 1500);
           return;
         }
-
-        if (!/usa|united states/i.test(query)) {
-          query += ", USA";
-        }
-
+        if (!/usa|united states/i.test(query)) query += ", USA";
         try {
           const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&countrycodes=us&limit=1&q=${encodeURIComponent(query)}`);
           const data = await res.json();
           if (!data.length) return alert("Address not found");
           const { lat, lon, display_name } = data[0];
           const pos = [parseFloat(lat), parseFloat(lon)];
-
           if (therapistMarker) map.removeLayer(therapistMarker);
           therapistMarker = L.marker(pos, {
             icon: L.icon({
@@ -318,12 +294,10 @@
               iconAnchor: [16, 32]
             })
           }).addTo(map).bindPopup(`<b>Therapist</b><br>${display_name}`).openPopup();
-
           map.setView(pos, 7);
-
           const R = 6371;
           const deg2rad = d => d * Math.PI / 180;
-          let listHtml = `<b>Distances from ${display_name}:</b><br><br>`;
+          const results = [];
           for (const m of markers) {
             const lat1 = pos[0], lon1 = pos[1];
             const lat2 = m.marker.getLatLng().lat;
@@ -333,8 +307,11 @@
             const a = Math.sin(dLat/2)**2 + Math.cos(deg2rad(lat1))*Math.cos(deg2rad(lat2))*Math.sin(dLon/2)**2;
             const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
             const dist = (R * c).toFixed(1);
-            listHtml += `${m.name} — <b>${dist} km</b><br>`;
+            results.push({ name: m.name, dist });
           }
+          results.sort((a,b)=>a.dist-b.dist);
+          let listHtml = `<b>Distances from ${display_name} (closest first):</b><br><br>`;
+          for (const r of results) listHtml += `${r.name} — <b>${r.dist} km</b><br>`;
           document.getElementById("distanceResults").innerHTML = listHtml;
         } catch (err) {
           console.error("Therapist search failed", err);
