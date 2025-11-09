@@ -146,6 +146,7 @@
       }).addTo(map);
 
       const markers = [];
+      let therapistMarker = null;
 
       // Popup logic
       document.getElementById("addWorkerBtn").onclick = () =>
@@ -249,15 +250,26 @@
         }
       }
 
-      // 🧹 Clear all workers
+      // 🧹 Clear all workers + therapist
       document.getElementById("clearListBtn").addEventListener("click", () => {
-        if (!confirm("Clear all loaded workers from the list and map?")) return;
-        const list = document.getElementById("facilityList");
-        list.innerHTML = "";
+        if (!confirm("Clear all loaded workers and therapist marker?")) return;
+
+        // clear sidebar list
+        document.getElementById("facilityList").innerHTML = "";
+
+        // remove all worker markers
         for (const m of markers) {
           map.removeLayer(m.marker);
         }
         markers.length = 0;
+
+        // remove therapist marker if present
+        if (therapistMarker) {
+          map.removeLayer(therapistMarker);
+          therapistMarker = null;
+        }
+
+        // reset sidebar + recenter
         document.getElementById("distanceResults").innerHTML = "<i>No therapist selected.</i>";
         map.setView([39.8283, -98.5795], 4);
       });
@@ -268,8 +280,7 @@
         map.fitBounds(group.getBounds().pad(0.3));
       }
 
-      // 🩵 Therapist search (with auto USA + friendly message)
-      let therapistMarker = null;
+      // 🩵 Therapist search (auto-USA + friendly message)
       document.getElementById("therapistBtn").addEventListener("click", async () => {
         const input = document.getElementById("therapistInput");
         let query = input.value.trim();
@@ -291,6 +302,7 @@
           if (!data.length) return alert("Address not found");
           const { lat, lon, display_name } = data[0];
           const pos = [parseFloat(lat), parseFloat(lon)];
+
           if (therapistMarker) map.removeLayer(therapistMarker);
           therapistMarker = L.marker(pos, {
             icon: L.icon({
@@ -299,7 +311,9 @@
               iconAnchor: [16, 32]
             })
           }).addTo(map).bindPopup(`<b>Therapist</b><br>${display_name}`).openPopup();
+
           map.setView(pos, 7);
+
           const R = 6371;
           const deg2rad = d => d * Math.PI / 180;
           let listHtml = `<b>Distances from ${display_name}:</b><br><br>`;
