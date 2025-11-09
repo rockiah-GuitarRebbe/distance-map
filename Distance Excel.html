@@ -102,6 +102,13 @@
         <button id="uploadExcelBtn">📂 Excel</button>
         <button id="addWorkerBtn">➕ Add</button>
       </div>
+     <div style="padding:10px; border-bottom:1px solid #ddd;">
+  <label><b>Therapist Location:</b></label><br />
+  <input id="therapistInput" placeholder="Enter city, ZIP, or address"
+         style="width:90%; padding:6px;" />
+  <button id="therapistBtn">📍 Show</button>
+</div>
+ 
     </header>
     <ul id="facilityList"></ul>
   </div>
@@ -240,8 +247,62 @@
         map.fitBounds(group.getBounds().pad(0.3));
       }
     });
+    // Therapist search & distance logic
+let therapistMarker = null;
+
+document.getElementById("therapistBtn").onclick = async () => {
+  const query = document.getElementById("therapistInput").value.trim();
+  if (!query) return alert("Enter a city, ZIP, or address");
+
+  try {
+    // free geocode via OpenStreetMap
+    const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}`);
+    const data = await res.json();
+    if (!data.length) return alert("Address not found");
+
+    const { lat, lon, display_name } = data[0];
+    const pos = [parseFloat(lat), parseFloat(lon)];
+
+    // Remove previous therapist marker
+    if (therapistMarker) map.removeLayer(therapistMarker);
+
+    // Add new blue marker
+    therapistMarker = L.marker(pos, {
+      icon: L.icon({
+        iconUrl: "https://maps.gstatic.com/mapfiles/ms2/micons/blue-dot.png",
+        iconSize: [32, 32],
+        iconAnchor: [16, 32]
+      })
+    }).addTo(map).bindPopup(`<b>Therapist</b><br>${display_name}`).openPopup();
+
+    map.setView(pos, 7);
+
+    // Compute and show straight-line distances
+    const R = 6371; // Earth radius km
+    const deg2rad = d => d * Math.PI / 180;
+
+    let msg = `📍 <b>From ${display_name}</b><br><br>`;
+    for (const m of markers) {
+      const lat1 = pos[0], lon1 = pos[1];
+      const lat2 = m.marker.getLatLng().lat;
+      const lon2 = m.marker.getLatLng().lng;
+      const dLat = deg2rad(lat2 - lat1);
+      const dLon = deg2rad(lon2 - lon1);
+      const a = Math.sin(dLat/2)**2 + Math.cos(deg2rad(lat1))*Math.cos(deg2rad(lat2))*Math.sin(dLon/2)**2;
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+      const dist = (R * c).toFixed(1);
+      msg += `${m.name} — ${dist} km<br>`;
+    }
+
+    therapistMarker.bindPopup(msg).openPopup();
+  } catch (err) {
+    console.error("Therapist search failed", err);
+  }
+};
+
   </script>
 </body>
 </html>
+
 
 
