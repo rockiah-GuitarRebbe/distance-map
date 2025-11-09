@@ -19,7 +19,7 @@
     }
 
     .sidebar {
-      width: 30%;
+      width: 22%;
       min-width: 250px;
       height: 100vh;
       border-right: 1px solid #ddd;
@@ -53,9 +53,9 @@
     }
 
     #map {
-      flex: 1;
+      flex-grow: 1;
       height: 100vh;
-      min-width: 0;
+      width: 100%;
     }
 
     button {
@@ -167,8 +167,9 @@
           const worker = { name, address: address + ", USA" };
           addWorker(worker, true);
           socket.emit("addWorker", worker);
-          await new Promise(r => setTimeout(r, 1500));
+          await new Promise(r => setTimeout(r, 2500)); // slower to avoid rate limit
         }
+        fitAllMarkers();
       }
 
       socket.on("loadWorkers", (workers) => workers.forEach(w => addWorker(w, false)));
@@ -202,6 +203,7 @@
               .bindPopup(`<b>${worker.name}</b><br>${worker.address}`);
             markers.push({ ...worker, marker });
             if (scrollToMarker) map.setView([lat, lon], 8);
+            fitAllMarkers();
           }
         } catch (e) {
           console.error("Lookup failed", e);
@@ -211,8 +213,18 @@
       function removeWorker(worker) {
         const li = document.querySelector(`li[data-name="${worker.name}"][data-address="${worker.address}"]`);
         if (li) li.remove();
-        const m = markers.find(x => x.name === worker.name && x.address === worker.address);
-        if (m) map.removeLayer(m.marker);
+        const index = markers.findIndex(x => x.name === worker.name && x.address === worker.address);
+        if (index >= 0) {
+          map.removeLayer(markers[index].marker);
+          markers.splice(index, 1);
+          fitAllMarkers();
+        }
+      }
+
+      function fitAllMarkers() {
+        if (markers.length === 0) return;
+        const group = new L.featureGroup(markers.map(m => m.marker));
+        map.fitBounds(group.getBounds().pad(0.3));
       }
     });
   </script>
