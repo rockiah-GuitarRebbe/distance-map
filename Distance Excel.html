@@ -73,6 +73,7 @@
       color: white;
       font-size: 14px;
     }
+
     button:hover { background: #005fa3; }
 
     #addWorkerPopup {
@@ -107,7 +108,6 @@
         <button id="uploadExcelBtn">📂 Excel</button>
         <button id="addWorkerBtn">➕ Add</button>
         <button id="clearListBtn" style="background:#e74c3c;">🧹 Clear</button>
-
       </div>
     </header>
 
@@ -184,30 +184,14 @@
         reader.readAsArrayBuffer(file);
         e.target.value = "";
       });
-      // 🧹 Clear all workers
-document.getElementById("clearListBtn").addEventListener("click", () => {
-  if (!confirm("Clear all loaded workers from the list and map?")) return;
-
-  // Clear sidebar list
-  document.getElementById("facilityList").innerHTML = "";
-
-  // Remove all worker markers from map
-  markers.forEach(m => map.removeLayer(m.marker));
-  markers.length = 0;
-
-  fitAllMarkers(); // re-center map if needed
-});
-
 
       async function uploadRows(rows) {
         for (const row of rows) {
           const keys = Object.keys(row);
           if (keys.length < 2) continue;
-
           const name = row[keys[0]];
           const address = row[keys[1]];
           if (!name || !address) continue;
-
           const worker = { name, address };
           addWorker(worker, true);
           socket.emit("addWorker", worker);
@@ -236,7 +220,7 @@ document.getElementById("clearListBtn").addEventListener("click", () => {
           removeWorker(worker);
         };
         li.appendChild(delBtn);
-        list.appendChild(li);
+        list.prepend(li);
 
         try {
           const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&countrycodes=us&limit=1&q=${encodeURIComponent(worker.address)}`);
@@ -265,6 +249,19 @@ document.getElementById("clearListBtn").addEventListener("click", () => {
         }
       }
 
+      // 🧹 Clear all workers
+      document.getElementById("clearListBtn").addEventListener("click", () => {
+        if (!confirm("Clear all loaded workers from the list and map?")) return;
+        const list = document.getElementById("facilityList");
+        list.innerHTML = "";
+        for (const m of markers) {
+          map.removeLayer(m.marker);
+        }
+        markers.length = 0;
+        document.getElementById("distanceResults").innerHTML = "<i>No therapist selected.</i>";
+        map.setView([39.8283, -98.5795], 4);
+      });
+
       function fitAllMarkers() {
         if (markers.length === 0) return;
         const group = new L.featureGroup(markers.map(m => m.marker));
@@ -276,15 +273,12 @@ document.getElementById("clearListBtn").addEventListener("click", () => {
       document.getElementById("therapistBtn").addEventListener("click", async () => {
         const query = document.getElementById("therapistInput").value.trim();
         if (!query) return alert("Enter a city, ZIP, or address");
-
         try {
           const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&countrycodes=us&limit=1&q=${encodeURIComponent(query)}`);
           const data = await res.json();
           if (!data.length) return alert("Address not found");
-
           const { lat, lon, display_name } = data[0];
           const pos = [parseFloat(lat), parseFloat(lon)];
-
           if (therapistMarker) map.removeLayer(therapistMarker);
           therapistMarker = L.marker(pos, {
             icon: L.icon({
@@ -293,13 +287,10 @@ document.getElementById("clearListBtn").addEventListener("click", () => {
               iconAnchor: [16, 32]
             })
           }).addTo(map).bindPopup(`<b>Therapist</b><br>${display_name}`).openPopup();
-
           map.setView(pos, 7);
-
           const R = 6371;
           const deg2rad = d => d * Math.PI / 180;
           let listHtml = `<b>Distances from ${display_name}:</b><br><br>`;
-
           for (const m of markers) {
             const lat1 = pos[0], lon1 = pos[1];
             const lat2 = m.marker.getLatLng().lat;
@@ -311,7 +302,6 @@ document.getElementById("clearListBtn").addEventListener("click", () => {
             const dist = (R * c).toFixed(1);
             listHtml += `${m.name} — <b>${dist} km</b><br>`;
           }
-
           document.getElementById("distanceResults").innerHTML = listHtml;
         } catch (err) {
           console.error("Therapist search failed", err);
@@ -322,4 +312,3 @@ document.getElementById("clearListBtn").addEventListener("click", () => {
   </script>
 </body>
 </html>
-
