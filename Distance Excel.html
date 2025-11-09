@@ -8,81 +8,89 @@
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 
-  <style>
-    html, body {
-      height: 100%;
-      margin: 0;
-      padding: 0;
-      font-family: system-ui, Arial, sans-serif;
-      display: flex;
-      flex-direction: row;
-    }
+ <style>
+  html, body {
+    height: 100%;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    font-family: system-ui, Arial, sans-serif;
+  }
 
-    .sidebar {
-      width: 22%;
-      min-width: 250px;
-      height: 100vh;
-      border-right: 1px solid #ddd;
-      background: #f8f8f8;
-      display: flex;
-      flex-direction: column;
-    }
+  body {
+    display: flex;
+    flex-direction: row;
+    overflow: hidden;
+  }
 
-    header {
-      padding: 10px;
-      border-bottom: 1px solid #ddd;
-      background: #fafafa;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 8px;
-    }
+  .sidebar {
+    flex: 0 0 20%;
+    min-width: 260px;
+    max-width: 400px;
+    height: 100vh;
+    border-right: 1px solid #ddd;
+    background: #f8f8f8;
+    display: flex;
+    flex-direction: column;
+  }
 
-    #facilityList {
-      list-style: none;
-      margin: 0;
-      padding: 10px;
-      overflow-y: auto;
-      flex: 1;
-    }
+  header {
+    padding: 10px;
+    border-bottom: 1px solid #ddd;
+    background: #fafafa;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+  }
 
-    #facilityList li {
-      margin-bottom: 6px;
-      border-bottom: 1px solid #eee;
-      padding-bottom: 4px;
-    }
+  #facilityList {
+    list-style: none;
+    margin: 0;
+    padding: 10px;
+    overflow-y: auto;
+    flex: 1;
+  }
 
-    #map {
-      flex-grow: 1;
-      height: 100vh;
-      width: 100%;
-    }
+  #facilityList li {
+    margin-bottom: 6px;
+    border-bottom: 1px solid #eee;
+    padding-bottom: 4px;
+  }
 
-    button {
-      cursor: pointer;
-      border: none;
-      border-radius: 6px;
-      padding: 6px 10px;
-      background: #0078d4;
-      color: white;
-      font-size: 14px;
-    }
-    button:hover { background: #005fa3; }
+  #map {
+    flex: 1 1 auto;
+    height: 100vh;
+    width: 100%;
+  }
 
-    #addWorkerPopup {
-      display: none;
-      position: fixed;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      background: #fff;
-      border: 2px solid #ccc;
-      border-radius: 10px;
-      padding: 20px;
-      box-shadow: 0 4px 10px rgba(0,0,0,0.3);
-      z-index: 9999;
-    }
-  </style>
+  button {
+    cursor: pointer;
+    border: none;
+    border-radius: 6px;
+    padding: 6px 10px;
+    background: #0078d4;
+    color: white;
+    font-size: 14px;
+  }
+
+  button:hover { background: #005fa3; }
+
+  #addWorkerPopup {
+    display: none;
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: #fff;
+    border: 2px solid #ccc;
+    border-radius: 10px;
+    padding: 20px;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+    z-index: 9999;
+  }
+</style>
+
 </head>
 
 <body>
@@ -230,3 +238,4 @@
   </script>
 </body>
 </html>
+
