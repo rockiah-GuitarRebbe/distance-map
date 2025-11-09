@@ -187,7 +187,6 @@
         e.target.value = "";
       });
 
-      // 🚨 upload that can be canceled mid-way
       async function uploadRows(rows) {
         cancelUpload = false;
         for (const row of rows) {
@@ -201,7 +200,7 @@
           const address = row[keys[1]];
           if (!name || !address) continue;
           const worker = { name, address };
-          if (cancelUpload) break; // double check before adding
+          if (cancelUpload) break;
           addWorker(worker, true);
           socket.emit("addWorker", worker);
           await new Promise(r => setTimeout(r, 2500));
@@ -214,7 +213,7 @@
       socket.on("workerDeleted", removeWorker);
 
       async function addWorker(worker, scrollToMarker) {
-        if (cancelUpload) return; // safeguard
+        if (cancelUpload) return;
         if (document.querySelector(`li[data-name="${worker.name}"][data-address="${worker.address}"]`)) return;
 
         const list = document.getElementById("facilityList");
@@ -235,7 +234,7 @@
         try {
           const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&countrycodes=us&limit=1&q=${encodeURIComponent(worker.address)}`);
           const data = await res.json();
-          if (cancelUpload) return; // cancel mid-geocode
+          if (cancelUpload) return;
           if (data.length > 0) {
             const { lat, lon } = data[0];
             const marker = L.marker([lat, lon]).addTo(map)
@@ -264,26 +263,21 @@
       document.getElementById("clearListBtn").addEventListener("click", () => {
         if (!confirm("Clear all loaded workers and therapist marker?")) return;
 
-        cancelUpload = true; // 🚨 stop Excel process
-        document.getElementById("excelInput").value = ""; // stop current file load
+        cancelUpload = true;
+        document.getElementById("excelInput").value = "";
 
-        // clear sidebar list
         document.getElementById("facilityList").innerHTML = "";
 
-        // remove all worker markers
-        for (const m of markers) {
-          map.removeLayer(m.marker);
-        }
+        for (const m of markers) map.removeLayer(m.marker);
         markers.length = 0;
 
-        // remove therapist marker if present
         if (therapistMarker) {
           map.removeLayer(therapistMarker);
           therapistMarker = null;
         }
 
-        // reset sidebar + recenter
         document.getElementById("distanceResults").innerHTML = "<i>No therapist selected.</i>";
+        document.getElementById("therapistInput").value = ""; // ✅ clear therapist ZIP box
         map.setView([39.8283, -98.5795], 4);
       });
 
@@ -293,7 +287,7 @@
         map.fitBounds(group.getBounds().pad(0.3));
       }
 
-      // 🩵 Therapist search (auto-USA + friendly message)
+      // 🩵 Therapist search
       document.getElementById("therapistBtn").addEventListener("click", async () => {
         const input = document.getElementById("therapistInput");
         let query = input.value.trim();
