@@ -106,6 +106,8 @@
         <input type="file" id="excelInput" accept=".xlsx,.xls" style="display:none" />
         <button id="uploadExcelBtn">📂 Excel</button>
         <button id="addWorkerBtn">➕ Add</button>
+        <button id="clearListBtn" style="background:#e74c3c;">🧹 Clear</button>
+
       </div>
     </header>
 
@@ -182,6 +184,20 @@
         reader.readAsArrayBuffer(file);
         e.target.value = "";
       });
+      // 🧹 Clear all workers
+document.getElementById("clearListBtn").addEventListener("click", () => {
+  if (!confirm("Clear all loaded workers from the list and map?")) return;
+
+  // Clear sidebar list
+  document.getElementById("facilityList").innerHTML = "";
+
+  // Remove all worker markers from map
+  markers.forEach(m => map.removeLayer(m.marker));
+  markers.length = 0;
+
+  fitAllMarkers(); // re-center map if needed
+});
+
 
       async function uploadRows(rows) {
         for (const row of rows) {
@@ -306,3 +322,4 @@
   </script>
 </body>
 </html>
+
