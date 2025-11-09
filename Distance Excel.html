@@ -167,18 +167,23 @@
         e.target.value = "";
       });
 
-      async function uploadRows(rows) {
-        for (const row of rows) {
-          const name = row.Name || row.name;
-          const address = row.Address || row.address;
-          if (!name || !address) continue;
-          const worker = { name, address: address + ", USA" };
-          addWorker(worker, true);
-          socket.emit("addWorker", worker);
-          await new Promise(r => setTimeout(r, 2500)); // slower to avoid rate limit
-        }
-        fitAllMarkers();
-      }
+     async function uploadRows(rows) {
+  for (const row of rows) {
+    const keys = Object.keys(row);
+    if (keys.length < 2) continue;
+
+    const name = row[keys[0]];      // e.g. "Facility 1"
+    const address = row[keys[1]];   // e.g. "254 Edwards Blvd..."
+    if (!name || !address) continue;
+
+    const worker = { name, address };
+    addWorker(worker, true);
+    socket.emit("addWorker", worker);
+    await new Promise(r => setTimeout(r, 2500));
+  }
+  fitAllMarkers();
+}
+
 
       socket.on("loadWorkers", (workers) => workers.forEach(w => addWorker(w, false)));
       socket.on("workerAdded", (worker) => addWorker(worker, false));
@@ -238,4 +243,5 @@
   </script>
 </body>
 </html>
+
 
