@@ -147,7 +147,7 @@
 
       const markers = [];
       let therapistMarker = null;
-      let cancelUpload = false; // 🚨 emergency stop flag
+      let cancelUpload = false;
 
       // Popup logic
       document.getElementById("addWorkerBtn").onclick = () =>
@@ -192,7 +192,7 @@
         cancelUpload = false;
         for (const row of rows) {
           if (cancelUpload) {
-            console.log("⛔ Upload canceled.");
+            console.log("⛔ Upload canceled mid-process.");
             break;
           }
           const keys = Object.keys(row);
@@ -201,6 +201,7 @@
           const address = row[keys[1]];
           if (!name || !address) continue;
           const worker = { name, address };
+          if (cancelUpload) break; // double check before adding
           addWorker(worker, true);
           socket.emit("addWorker", worker);
           await new Promise(r => setTimeout(r, 2500));
@@ -213,6 +214,7 @@
       socket.on("workerDeleted", removeWorker);
 
       async function addWorker(worker, scrollToMarker) {
+        if (cancelUpload) return; // safeguard
         if (document.querySelector(`li[data-name="${worker.name}"][data-address="${worker.address}"]`)) return;
 
         const list = document.getElementById("facilityList");
@@ -233,6 +235,7 @@
         try {
           const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&countrycodes=us&limit=1&q=${encodeURIComponent(worker.address)}`);
           const data = await res.json();
+          if (cancelUpload) return; // cancel mid-geocode
           if (data.length > 0) {
             const { lat, lon } = data[0];
             const marker = L.marker([lat, lon]).addTo(map)
@@ -262,6 +265,7 @@
         if (!confirm("Clear all loaded workers and therapist marker?")) return;
 
         cancelUpload = true; // 🚨 stop Excel process
+        document.getElementById("excelInput").value = ""; // stop current file load
 
         // clear sidebar list
         document.getElementById("facilityList").innerHTML = "";
