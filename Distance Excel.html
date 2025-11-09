@@ -110,6 +110,9 @@
              style="width:90%; padding:6px;" />
       <button id="therapistBtn">📍 Show</button>
     </div>
+<div id="distanceResults" style="padding:10px; font-size:14px; overflow-y:auto; max-height:200px;">
+  <i>No therapist selected.</i>
+</div>
 
     <ul id="facilityList"></ul>
   </div>
@@ -275,21 +278,27 @@
 
           const R = 6371;
           const deg2rad = d => d * Math.PI / 180;
-          let msg = `📍 <b>From ${display_name}</b><br><br>`;
+         let msg = `<b>From ${display_name}</b><br><br>`;
+let listHtml = `<b>Distances from ${display_name}:</b><br><br>`;
 
-          for (const m of markers) {
-            const lat1 = pos[0], lon1 = pos[1];
-            const lat2 = m.marker.getLatLng().lat;
-            const lon2 = m.marker.getLatLng().lng;
-            const dLat = deg2rad(lat2 - lat1);
-            const dLon = deg2rad(lon2 - lon1);
-            const a = Math.sin(dLat/2)**2 + Math.cos(deg2rad(lat1))*Math.cos(deg2rad(lat2))*Math.sin(dLon/2)**2;
-            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-            const dist = (R * c).toFixed(1);
-            msg += `${m.name} — ${dist} km<br>`;
-          }
+for (const m of markers) {
+  const lat1 = pos[0], lon1 = pos[1];
+  const lat2 = m.marker.getLatLng().lat;
+  const lon2 = m.marker.getLatLng().lng;
+  const dLat = deg2rad(lat2 - lat1);
+  const dLon = deg2rad(lon2 - lon1);
+  const a = Math.sin(dLat/2)**2 + Math.cos(deg2rad(lat1))*Math.cos(deg2rad(lat2))*Math.sin(dLon/2)**2;
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  const dist = (R * c).toFixed(1);
+  listHtml += `${m.name} — <b>${dist} km</b><br>`;
+}
 
-          therapistMarker.bindPopup(msg).openPopup();
+// show on sidebar
+document.getElementById("distanceResults").innerHTML = listHtml;
+
+// still keep a short popup
+therapistMarker.bindPopup(`Therapist: ${display_name}`).openPopup();
+
         } catch (err) {
           console.error("Therapist search failed", err);
           alert("Search failed — try again.");
@@ -299,3 +308,4 @@
   </script>
 </body>
 </html>
+
