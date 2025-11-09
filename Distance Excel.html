@@ -1,22 +1,20 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Distance Map — Beautiful Layout</title>
+  <meta charset="UTF-8" />
+  <title>Distance Map — Free Client Geocoding</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <style>
     body {
-      font-family: system-ui, Arial, sans-serif;
       margin: 0;
+      font-family: system-ui, Arial, sans-serif;
       height: 100vh;
       display: grid;
       grid-template-columns: 30% 70%;
     }
-
-    /* Left panel (list + buttons) */
     .sidebar {
       display: flex;
       flex-direction: column;
@@ -24,7 +22,6 @@
       background: #f8f8f8;
       height: 100vh;
     }
-
     header {
       padding: 10px;
       border-bottom: 1px solid #ddd;
@@ -34,7 +31,6 @@
       align-items: center;
       gap: 8px;
     }
-
     #facilityList {
       list-style: none;
       margin: 0;
@@ -42,18 +38,12 @@
       overflow-y: auto;
       flex: 1;
     }
-
     #facilityList li {
       margin-bottom: 6px;
       border-bottom: 1px solid #eee;
       padding-bottom: 4px;
     }
-
-    #map {
-      height: 100vh;
-      width: 100%;
-    }
-
+    #map { height: 100vh; width: 100%; }
     button {
       cursor: pointer;
       border: none;
@@ -63,11 +53,7 @@
       color: white;
       font-size: 14px;
     }
-
-    button:hover {
-      background: #005fa3;
-    }
-
+    button:hover { background: #005fa3; }
     #addWorkerPopup {
       display: none;
       position: fixed;
@@ -88,12 +74,11 @@
     <header>
       <h3>Loaded Workers</h3>
       <div>
-        <input type="file" id="excelInput" accept=".xlsx,.xls" style="display:none">
+        <input type="file" id="excelInput" accept=".xlsx,.xls" style="display:none" />
         <button id="uploadExcelBtn">📂 Excel</button>
         <button id="addWorkerBtn">➕ Add</button>
       </div>
     </header>
-
     <ul id="facilityList"></ul>
   </div>
 
@@ -102,10 +87,10 @@
   <!-- Add Worker Popup -->
   <div id="addWorkerPopup">
     <h3>Add Worker</h3>
-    <label>Name:</label><br>
-    <input id="workerName" placeholder="Enter name" style="width:250px;"><br><br>
-    <label>Address:</label><br>
-    <input id="workerAddress" placeholder="Enter address" style="width:250px;"><br><br>
+    <label>Name:</label><br />
+    <input id="workerName" placeholder="Enter name" style="width:250px;" /><br /><br />
+    <label>Address:</label><br />
+    <input id="workerAddress" placeholder="Enter address" style="width:250px;" /><br /><br />
     <button id="saveWorkerBtn">Add</button>
     <button id="cancelWorkerBtn" style="background:#aaa;">Cancel</button>
   </div>
@@ -119,114 +104,15 @@
 
     const markers = [];
 
-    // --- popup logic ---
+    // Popup logic
     document.getElementById("addWorkerBtn").onclick = () =>
       document.getElementById("addWorkerPopup").style.display = "block";
     document.getElementById("cancelWorkerBtn").onclick = () =>
       document.getElementById("addWorkerPopup").style.display = "none";
 
-    // --- save new worker ---
-    document.getElementById("saveWorkerBtn").onclick = async () => {
+    // Add worker manually
+    document.getElementById("saveWorkerBtn").onclick = () => {
       const name = document.getElementById("workerName").value.trim();
       const address = document.getElementById("workerAddress").value.trim();
       if (!name || !address) return alert("Please enter both fields");
-      const worker = { name, address: address + ", USA" };
-      addWorker(worker);
-      socket.emit("addWorker", worker);
-      document.getElementById("addWorkerPopup").style.display = "none";
-      document.getElementById("workerName").value = "";
-      document.getElementById("workerAddress").value = "";
-    };
-
-    // --- Excel upload ---
-    document.getElementById("uploadExcelBtn").onclick = () =>
-      document.getElementById("excelInput").click();
-
-    document.getElementById("excelInput").addEventListener("change", (e) => {
-      const file = e.target.files[0];
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = (evt) => {
-        const data = new Uint8Array(evt.target.result);
-        const workbook = XLSX.read(data, { type: "array" });
-        const sheet = workbook.Sheets[workbook.SheetNames[0]];
-        const json = XLSX.utils.sheet_to_json(sheet);
-        uploadRows(json);
-      };
-      reader.readAsArrayBuffer(file);
-      e.target.value = "";
-    });
-
- async function uploadRows(rows) {
-  for (const row of rows) {
-    const name = row.Name || row.name;
-    const address = row.Address || row.address;
-    if (!name || !address) continue;
-
-    const worker = { name, address: address + ", USA" };
-    addWorker(worker);
-    socket.emit("addWorker", worker);
-
-    // wait 2 seconds between lookups
-    await new Promise(r => setTimeout(r, 2000));
-  }
-}
-
-
-    // --- sockets ---
-    socket.on("loadWorkers", (workers) => workers.forEach(addWorker));
-    socket.on("workerAdded", addWorker);
-    socket.on("workerDeleted", removeWorker);
-
-    // --- functions ---
-    async function addWorker(worker) {
-      if (document.querySelector(`li[data-name="${worker.name}"][data-address="${worker.address}"]`)) return;
-      const list = document.getElementById("facilityList");
-      const li = document.createElement("li");
-      li.dataset.name = worker.name;
-      li.dataset.address = worker.address;
-      li.textContent = `${worker.name} — ${worker.address}`;
-      const delBtn = document.createElement("button");
-      delBtn.textContent = "❌";
-      delBtn.style.marginLeft = "10px";
-      delBtn.onclick = () => {
-        socket.emit("deleteWorker", worker);
-        removeWorker(worker);
-      };
-      li.appendChild(delBtn);
-      list.appendChild(li);
-
-      try {
-        let data = [];
-for (let attempt = 0; attempt < 2; attempt++) {
-  const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(worker.address)}`);
-  data = await res.json();
-  if (data.length > 0) break;       // stop if found
-  await new Promise(r => setTimeout(r, 1500)); // small pause before retry
-}
-
-if (data.length > 0) {
-  const { lat, lon } = data[0];
-  const marker = L.marker([lat, lon]).addTo(map)
-    .bindPopup(`<b>${worker.name}</b><br>${worker.address}`);
-  markers.push({ ...worker, marker });
-  map.setView([lat, lon], 8);
-}
-
-        }
-      } catch (e) {
-        console.error("Address lookup failed", e);
-      }
-    }
-
-    function removeWorker(worker) {
-      const li = document.querySelector(`li[data-name="${worker.name}"][data-address="${worker.address}"]`);
-      if (li) li.remove();
-      const m = markers.find(x => x.name === worker.name && x.address === worker.address);
-      if (m) map.removeLayer(m.marker);
-    }
-  </script>
-</body>
-</html>
-
-
+      const worker = { name,
