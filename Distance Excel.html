@@ -218,7 +218,8 @@
         list.appendChild(li);
 
         try {
-          const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(worker.address)}`);
+         const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&countrycodes=us&q=${encodeURIComponent(query)}`);
+
           const data = await res.json();
           if (data.length > 0) {
             const { lat, lon } = data[0];
@@ -308,4 +309,5 @@ therapistMarker.bindPopup(`Therapist: ${display_name}`).openPopup();
   </script>
 </body>
 </html>
+
 
