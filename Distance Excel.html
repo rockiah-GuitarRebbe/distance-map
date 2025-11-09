@@ -157,19 +157,21 @@
       e.target.value = "";
     });
 
-    async function uploadRows(rows) {
-      for (const row of rows) {
-        const name = row.Name || row.name;
-        const address = row.Address || row.address;
-        if (name && address) {
-          const worker = { name, address: address + ", USA" };
-          addWorker(worker);
-          socket.emit("addWorker", worker);
-         await new Promise(r => setTimeout(r, 1500)); // 1.5s delay for reliability
+ async function uploadRows(rows) {
+  for (const row of rows) {
+    const name = row.Name || row.name;
+    const address = row.Address || row.address;
+    if (!name || !address) continue;
 
-        }
-      }
-    }
+    const worker = { name, address: address + ", USA" };
+    addWorker(worker);
+    socket.emit("addWorker", worker);
+
+    // wait 2 seconds between lookups
+    await new Promise(r => setTimeout(r, 2000));
+  }
+}
+
 
     // --- sockets ---
     socket.on("loadWorkers", (workers) => workers.forEach(addWorker));
@@ -195,14 +197,22 @@
       list.appendChild(li);
 
       try {
-        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(worker.address)}`);
-        const data = await res.json();
-        if (data.length > 0) {
-          const { lat, lon } = data[0];
-          const marker = L.marker([lat, lon]).addTo(map)
-            .bindPopup(`<b>${worker.name}</b><br>${worker.address}`);
-          markers.push({ ...worker, marker });
-          map.setView([lat, lon], 8);
+        let data = [];
+for (let attempt = 0; attempt < 2; attempt++) {
+  const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(worker.address)}`);
+  data = await res.json();
+  if (data.length > 0) break;       // stop if found
+  await new Promise(r => setTimeout(r, 1500)); // small pause before retry
+}
+
+if (data.length > 0) {
+  const { lat, lon } = data[0];
+  const marker = L.marker([lat, lon]).addTo(map)
+    .bindPopup(`<b>${worker.name}</b><br>${worker.address}`);
+  markers.push({ ...worker, marker });
+  map.setView([lat, lon], 8);
+}
+
         }
       } catch (e) {
         console.error("Address lookup failed", e);
@@ -218,4 +228,5 @@
   </script>
 </body>
 </html>
+
 
