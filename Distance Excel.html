@@ -1,140 +1,33 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <title>Distance Map — Free Client Geocoding</title>
+  <meta charset="UTF-8">
+  <title>Map Test</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
-  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <style>
     html, body {
-  height: 100%;
-  margin: 0;
-  padding: 0;
-  font-family: system-ui, Arial, sans-serif;
-  display: flex;
-  flex-direction: row;
-}
-
-.sidebar {
-  width: 30%;
-  min-width: 250px;
-  height: 100vh;
-  border-right: 1px solid #ddd;
-  background: #f8f8f8;
-}
-
-#map {
-  flex: 1;
-  height: 100vh;
-  min-width: 0;
-  background: #ddd;
-}
-
-    .sidebar {
-      display: flex;
-      flex-direction: column;
-      border-right: 1px solid #ddd;
-      background: #f8f8f8;
-      height: 100vh;
-    }
-    header {
-      padding: 10px;
-      border-bottom: 1px solid #ddd;
-      background: #fafafa;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 8px;
-    }
-    #facilityList {
-      list-style: none;
+      height: 100%;
       margin: 0;
-      padding: 10px;
-      overflow-y: auto;
+      padding: 0;
+      display: flex;
+    }
+    #map {
       flex: 1;
-    }
-    #facilityList li {
-      margin-bottom: 6px;
-      border-bottom: 1px solid #eee;
-      padding-bottom: 4px;
-    }
-    #map { height: 100vh; width: 100%; }
-    button {
-      cursor: pointer;
-      border: none;
-      border-radius: 6px;
-      padding: 6px 10px;
-      background: #0078d4;
-      color: white;
-      font-size: 14px;
-    }
-    button:hover { background: #005fa3; }
-    #addWorkerPopup {
-      display: none;
-      position: fixed;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      background: #fff;
-      border: 2px solid #ccc;
-      border-radius: 10px;
-      padding: 20px;
-      box-shadow: 0 4px 10px rgba(0,0,0,0.3);
-      z-index: 9999;
+      height: 100vh;
+      width: 100%;
     }
   </style>
 </head>
 <body>
-  <div class="sidebar">
-    <header>
-      <h3>Loaded Workers</h3>
-      <div>
-        <input type="file" id="excelInput" accept=".xlsx,.xls" style="display:none" />
-        <button id="uploadExcelBtn">📂 Excel</button>
-        <button id="addWorkerBtn">➕ Add</button>
-      </div>
-    </header>
-    <ul id="facilityList"></ul>
-  </div>
-
   <div id="map"></div>
-
-  <!-- Add Worker Popup -->
-  <div id="addWorkerPopup">
-    <h3>Add Worker</h3>
-    <label>Name:</label><br />
-    <input id="workerName" placeholder="Enter name" style="width:250px;" /><br /><br />
-    <label>Address:</label><br />
-    <input id="workerAddress" placeholder="Enter address" style="width:250px;" /><br /><br />
-    <button id="saveWorkerBtn">Add</button>
-    <button id="cancelWorkerBtn" style="background:#aaa;">Cancel</button>
-  </div>
-
   <script>
-   const socket = io();
-const map = L.map('map').setView([39.8283, -98.5795], 4);
-console.log("Map object:", map);
-document.getElementById("map").style.background = "#ddd";
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-  attribution: '© OpenStreetMap contributors'
-}).addTo(map);
-
-    const markers = [];
-
-    // Popup logic
-    document.getElementById("addWorkerBtn").onclick = () =>
-      document.getElementById("addWorkerPopup").style.display = "block";
-    document.getElementById("cancelWorkerBtn").onclick = () =>
-      document.getElementById("addWorkerPopup").style.display = "none";
-
-    // Add worker manually
-    document.getElementById("saveWorkerBtn").onclick = () => {
-      const name = document.getElementById("workerName").value.trim();
-      const address = document.getElementById("workerAddress").value.trim();
-      if (!name || !address) return alert("Please enter both fields");
-      const worker = { name,
-
-
-
+    window.addEventListener("load", () => {
+      const map = L.map('map').setView([39.8283, -98.5795], 4);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap contributors'
+      }).addTo(map);
+    });
+  </script>
+</body>
+</html>
