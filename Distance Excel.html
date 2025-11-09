@@ -268,17 +268,22 @@
         map.fitBounds(group.getBounds().pad(0.3));
       }
 
-      // 🩵 Therapist search
+      // 🩵 Therapist search (with auto USA + friendly message)
       let therapistMarker = null;
       document.getElementById("therapistBtn").addEventListener("click", async () => {
-        const query = document.getElementById("therapistInput").value.trim();
-     if (!query) {
-  alert("Please enter a ZIP code or full U.S. address.");
-  const input = document.getElementById("therapistInput");
-  input.style.border = "2px solid red";
-  setTimeout(() => (input.style.border = ""), 1500);
-  return;
-}
+        const input = document.getElementById("therapistInput");
+        let query = input.value.trim();
+
+        if (!query) {
+          alert("Please enter a ZIP code or full U.S. address.");
+          input.style.border = "2px solid red";
+          setTimeout(() => (input.style.border = ""), 1500);
+          return;
+        }
+
+        if (!/usa|united states/i.test(query)) {
+          query += ", USA";
+        }
 
         try {
           const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&countrycodes=us&limit=1&q=${encodeURIComponent(query)}`);
@@ -319,4 +324,3 @@
   </script>
 </body>
 </html>
-
