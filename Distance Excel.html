@@ -147,6 +147,7 @@
 
       const markers = [];
       let therapistMarker = null;
+      let cancelUpload = false; // 🚨 emergency stop flag
 
       // Popup logic
       document.getElementById("addWorkerBtn").onclick = () =>
@@ -186,8 +187,14 @@
         e.target.value = "";
       });
 
+      // 🚨 upload that can be canceled mid-way
       async function uploadRows(rows) {
+        cancelUpload = false;
         for (const row of rows) {
+          if (cancelUpload) {
+            console.log("⛔ Upload canceled.");
+            break;
+          }
           const keys = Object.keys(row);
           if (keys.length < 2) continue;
           const name = row[keys[0]];
@@ -250,9 +257,11 @@
         }
       }
 
-      // 🧹 Clear all workers + therapist
+      // 🧹 Clear all workers + therapist, stop upload
       document.getElementById("clearListBtn").addEventListener("click", () => {
         if (!confirm("Clear all loaded workers and therapist marker?")) return;
+
+        cancelUpload = true; // 🚨 stop Excel process
 
         // clear sidebar list
         document.getElementById("facilityList").innerHTML = "";
