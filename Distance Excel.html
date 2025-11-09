@@ -272,7 +272,14 @@
       let therapistMarker = null;
       document.getElementById("therapistBtn").addEventListener("click", async () => {
         const query = document.getElementById("therapistInput").value.trim();
-        if (!query) return alert("Enter a city, ZIP, or address");
+     if (!query) {
+  alert("Please enter a ZIP code or full U.S. address.");
+  const input = document.getElementById("therapistInput");
+  input.style.border = "2px solid red";
+  setTimeout(() => (input.style.border = ""), 1500);
+  return;
+}
+
         try {
           const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&countrycodes=us&limit=1&q=${encodeURIComponent(query)}`);
           const data = await res.json();
@@ -312,3 +319,4 @@
   </script>
 </body>
 </html>
+
