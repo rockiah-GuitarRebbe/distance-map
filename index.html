@@ -258,7 +258,13 @@
       socket.on("currentWorkers", (workerList) => {
         for (const w of workerList) addWorker(w, false);
       });
+      socket.on("cancelUploads", () => {
+  console.log("🛑 Uploads cancelled remotely.");
+  cancelUpload = true;
+});
+
     });
   </script>
 </body>
 </html>
+
