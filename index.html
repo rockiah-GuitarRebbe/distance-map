@@ -343,9 +343,25 @@
           console.error("Therapist search failed", err);
           alert("Search failed — try again.");
         }
+         // ← ADD THIS BLOCK HERE
+      socket.on("workerAdded", (worker) => addWorker(worker, false));
+      socket.on("workerRemoved", (worker) => {
+        const li = document.querySelector(`li[data-name='${worker.name}'][data-address='${worker.address}']`);
+        if (li) li.remove();
+      });
+      socket.on("allCleared", () => {
+        document.getElementById("facilityList").innerHTML = "";
+        for (const m of markers) map.removeLayer(m.marker);
+        markers.length = 0;
+      });
+      socket.on("currentWorkers", (workerList) => {
+        for (const w of workerList) addWorker(w, false);
+      });
+    });
       });
     });
   </script>
 </body>
 </html>
+
 
