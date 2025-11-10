@@ -14,8 +14,10 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 app.use(express.static(__dirname));
+
+// 👇 updated for index.html
 app.get("/", (req, res) => {
-  res.sendFile(path.join(__dirname, "Distance Excel.html"));
+  res.sendFile(path.join(__dirname, "index.html"));
 });
 
 const DATA_FILE = path.join(__dirname, "workers.json");
