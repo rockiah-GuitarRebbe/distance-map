@@ -108,18 +108,15 @@
 <body>
   <div class="sidebar">
     <header>
-  <h3>Loaded Workers</h3>
-  <div>
-    <!-- hidden Excel input -->
-    <input type="file" id="excelInput" accept=".xlsx,.xls" style="display:none" />
-    <!-- visible buttons -->
-    <button id="uploadExcelBtn">📂 Excel</button>
-    <button id="addWorkerBtn">➕ Add</button>
-    <button id="clearListBtn" style="background:#e74c3c;">🧹 Clear</button>
-  </div>
-</header>
+      <h3>Loaded Workers</h3>
+      <div>
+        <input type="file" id="excelInput" accept=".xlsx,.xls" style="display:none" />
+        <button id="uploadExcelBtn">📂 Excel</button>
+        <button id="addWorkerBtn">➕ Add</button>
+        <button id="clearListBtn" style="background:#e74c3c;">🧹 Clear</button>
+      </div>
+    </header>
 
-    <!-- Therapist search box -->
     <div style="padding:10px; border-bottom:1px solid #ddd;">
       <label><b>Therapist Location:</b></label><br />
       <input id="therapistInput" placeholder="Enter city, ZIP, or address" style="width:90%; padding:6px;" />
@@ -135,7 +132,6 @@
 
   <div id="map"></div>
 
-  <!-- Add Worker Popup -->
   <div id="addWorkerPopup">
     <h3>Add Worker</h3>
     <label>Name:</label><br />
@@ -147,243 +143,197 @@
   </div>
 
   <script>
-  <script>
-window.addEventListener("DOMContentLoaded", () => {
-  const excelBtn = document.getElementById("uploadExcelBtn");
-  const excelInput = document.getElementById("excelInput");
-  const socket = io(window.location.origin, { transports: ["websocket", "polling"] });
+  document.addEventListener("DOMContentLoaded", () => {
+    const socket = io(window.location.origin, { transports: ["websocket", "polling"] });
 
-  // 📂 Excel button opens file chooser
-  excelBtn.addEventListener("click", () => {
-    console.log("📂 Excel clicked");
-    excelInput.click();
-  });
+    const map = L.map("map").setView([39.8283, -98.5795], 4);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: "© OpenStreetMap contributors"
+    }).addTo(map);
 
-  // 🗺️ Setup map
-  const map = L.map("map").setView([39.8283, -98.5795], 4);
-  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    attribution: "© OpenStreetMap contributors"
-  }).addTo(map);
+    const markers = [];
+    let therapistMarker = null;
+    let cancelUpload = false;
 
-  const markers = [];
-  let therapistMarker = null;
-  let cancelUpload = false;
+    // Excel button
+    const excelBtn = document.getElementById("uploadExcelBtn");
+    const excelInput = document.getElementById("excelInput");
+    excelBtn.addEventListener("click", () => excelInput.click());
 
-  // ===============================
-  // MANUAL ADD WORKER POPUP
-  // ===============================
-  document.getElementById("addWorkerBtn").onclick = () =>
-    document.getElementById("addWorkerPopup").style.display = "block";
-  document.getElementById("cancelWorkerBtn").onclick = () =>
-    document.getElementById("addWorkerPopup").style.display = "none";
+    excelInput.addEventListener("change", (e) => {
+      const file = e.target.files[0];
+      if (!file) return alert("No file selected");
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        const data = new Uint8Array(evt.target.result);
+        const workbook = XLSX.read(data, { type: "array" });
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        const json = XLSX.utils.sheet_to_json(sheet);
+        uploadRows(json);
+      };
+      reader.readAsArrayBuffer(file);
+      e.target.value = "";
+    });
 
-  document.getElementById("saveWorkerBtn").onclick = () => {
-    const name = document.getElementById("workerName").value.trim();
-    const address = document.getElementById("workerAddress").value.trim();
-    if (!name || !address) return alert("Please enter both fields");
-    const worker = { name, address: address + ", USA" };
-    addWorker(worker, true);
-    socket.emit("addWorker", worker);
-    document.getElementById("addWorkerPopup").style.display = "none";
-    document.getElementById("workerName").value = "";
-    document.getElementById("workerAddress").value = "";
-  };
-
-  // ===============================
-  // EXCEL UPLOAD HANDLER
-  // ===============================
-  excelInput.addEventListener("change", (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    console.log("✅ Excel file selected:", file.name);
-    const reader = new FileReader();
-    reader.onload = (evt) => {
-      const data = new Uint8Array(evt.target.result);
-      const workbook = XLSX.read(data, { type: "array" });
-      const sheet = workbook.Sheets[workbook.SheetNames[0]];
-      const json = XLSX.utils.sheet_to_json(sheet);
-      uploadRows(json);
-    };
-    reader.readAsArrayBuffer(file);
-    e.target.value = "";
-  });
-
-  async function uploadRows(rows) {
-    cancelUpload = false;
-    for (const row of rows) {
-      if (cancelUpload) break;
-      const keys = Object.keys(row);
-      if (keys.length < 2) continue;
-      const name = row[keys[0]];
-      const address = row[keys[1]];
-      if (!name || !address) continue;
-      const worker = { name, address };
-      addWorker(worker, true);
-      socket.emit("addWorker", worker);
-      await new Promise(r => setTimeout(r, 1500));
-    }
-    fitAllMarkers();
-  }
-
-  // ===============================
-  // ADD / REMOVE WORKERS
-  // ===============================
-  async function addWorker(worker, scrollToMarker) {
-    if (document.querySelector(`li[data-name="${worker.name}"][data-address="${worker.address}"]`)) return;
-
-    const list = document.getElementById("facilityList");
-    const li = document.createElement("li");
-    li.dataset.name = worker.name;
-    li.dataset.address = worker.address;
-
-    const delBtn = document.createElement("button");
-    delBtn.textContent = "×";
-    delBtn.className = "delete-btn";
-    delBtn.onclick = () => {
-      removeWorker(worker);
-      socket.emit("removeWorker", worker);
-    };
-    li.appendChild(delBtn);
-
-    const label = document.createElement("span");
-    label.textContent = `${worker.name} — ${worker.address}`;
-    li.appendChild(label);
-    list.appendChild(li);
-
-    try {
-      const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&countrycodes=us&limit=1&q=${encodeURIComponent(worker.address)}`);
-      const data = await res.json();
-      if (data.length > 0) {
-        const { lat, lon } = data[0];
-        const marker = L.marker([lat, lon]).addTo(map).bindPopup(`<b>${worker.name}</b><br>${worker.address}`);
-        markers.push({ ...worker, marker });
-        if (scrollToMarker) map.setView([lat, lon], 8);
-        fitAllMarkers();
+    async function uploadRows(rows) {
+      cancelUpload = false;
+      for (const row of rows) {
+        if (cancelUpload) break;
+        const keys = Object.keys(row);
+        if (keys.length < 2) continue;
+        const name = row[keys[0]];
+        const address = row[keys[1]];
+        if (!name || !address) continue;
+        const worker = { name, address };
+        addWorker(worker, true);
+        socket.emit("addWorker", worker);
+        await new Promise((r) => setTimeout(r, 2500));
       }
-    } catch (e) {
-      console.error("Lookup failed", e);
-    }
-  }
-
-  function removeWorker(worker) {
-    const li = document.querySelector(`li[data-name="${worker.name}"][data-address="${worker.address}"]`);
-    if (li) li.remove();
-    const index = markers.findIndex(x => x.name === worker.name && x.address === worker.address);
-    if (index >= 0) {
-      map.removeLayer(markers[index].marker);
-      markers.splice(index, 1);
       fitAllMarkers();
     }
-  }
 
-  // ===============================
-  // CLEAR BUTTONS
-  // ===============================
-  document.getElementById("clearListBtn").addEventListener("click", () => {
-    if (!confirm("Clear all workers and therapist marker?")) return;
-    cancelUpload = true;
-    socket.emit("clearAll");
-    document.getElementById("facilityList").innerHTML = "";
-    for (const m of markers) map.removeLayer(m.marker);
-    markers.length = 0;
-    if (therapistMarker) {
+    async function addWorker(worker, scrollToMarker) {
+      if (cancelUpload) return;
+      if (document.querySelector(`li[data-name="${worker.name}"][data-address="${worker.address}"]`)) return;
+
+      const list = document.getElementById("facilityList");
+      const li = document.createElement("li");
+      li.dataset.name = worker.name;
+      li.dataset.address = worker.address;
+
+      const delBtn = document.createElement("button");
+      delBtn.textContent = "×";
+      delBtn.className = "delete-btn";
+      delBtn.onclick = () => removeWorker(worker);
+      li.appendChild(delBtn);
+
+      const label = document.createElement("span");
+      label.textContent = `${worker.name} — ${worker.address}`;
+      li.appendChild(label);
+
+      list.appendChild(li);
+
+      try {
+        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&countrycodes=us&limit=1&q=${encodeURIComponent(worker.address)}`);
+        const data = await res.json();
+        if (data.length > 0) {
+          const { lat, lon } = data[0];
+          const marker = L.marker([lat, lon]).addTo(map).bindPopup(`<b>${worker.name}</b><br>${worker.address}`);
+          markers.push({ ...worker, marker });
+          if (scrollToMarker) map.setView([lat, lon], 8);
+          fitAllMarkers();
+        }
+      } catch (e) {
+        console.error("Lookup failed", e);
+      }
+    }
+
+    function removeWorker(worker) {
+      const li = document.querySelector(`li[data-name="${worker.name}"][data-address="${worker.address}"]`);
+      if (li) li.remove();
+      const index = markers.findIndex(x => x.name === worker.name && x.address === worker.address);
+      if (index >= 0) {
+        map.removeLayer(markers[index].marker);
+        markers.splice(index, 1);
+        fitAllMarkers();
+      }
+    }
+
+    // Clear all
+    document.getElementById("clearListBtn").addEventListener("click", () => {
+      if (!confirm("Clear all workers and therapist?")) return;
+      cancelUpload = true;
+      document.getElementById("excelInput").value = "";
+      document.getElementById("facilityList").innerHTML = "";
+      for (const m of markers) map.removeLayer(m.marker);
+      markers.length = 0;
+      if (therapistMarker) {
+        map.removeLayer(therapistMarker);
+        therapistMarker = null;
+      }
+      document.getElementById("distanceResults").innerHTML = "<i>No therapist selected.</i>";
+      document.getElementById("therapistInput").value = "";
+      map.setView([39.8283, -98.5795], 4);
+    });
+
+    // Clear therapist
+    document.getElementById("clearTherapistBtn").addEventListener("click", () => {
+      if (!therapistMarker) return;
       map.removeLayer(therapistMarker);
       therapistMarker = null;
-    }
-    document.getElementById("distanceResults").innerHTML = "<i>No therapist selected.</i>";
-    document.getElementById("therapistInput").value = "";
-    map.setView([39.8283, -98.5795], 4);
-  });
+      document.getElementById("therapistInput").value = "";
+      document.getElementById("distanceResults").innerHTML = "<i>No therapist selected.</i>";
+    });
 
-  document.getElementById("clearTherapistBtn").addEventListener("click", () => {
-    if (!therapistMarker) return;
-    map.removeLayer(therapistMarker);
-    therapistMarker = null;
-    document.getElementById("therapistInput").value = "";
-    document.getElementById("distanceResults").innerHTML = "<i>No therapist selected.</i>";
-  });
-
-  // ===============================
-  // THERAPIST SEARCH (SORTED DISTANCES)
-  // ===============================
-  document.getElementById("therapistBtn").addEventListener("click", async () => {
-    const input = document.getElementById("therapistInput");
-    let query = input.value.trim();
-    if (!query) {
-      alert("Please enter a ZIP code or full U.S. address.");
-      input.style.border = "2px solid red";
-      setTimeout(() => (input.style.border = ""), 1500);
-      return;
+    function fitAllMarkers() {
+      if (markers.length === 0) return;
+      const group = new L.featureGroup(markers.map(m => m.marker));
+      map.fitBounds(group.getBounds().pad(0.3));
     }
-    if (!/usa|united states/i.test(query)) query += ", USA";
-    try {
-      const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&countrycodes=us&limit=1&q=${encodeURIComponent(query)}`);
-      const data = await res.json();
-      if (!data.length) return alert("Address not found");
-      const { lat, lon, display_name } = data[0];
-      const pos = [parseFloat(lat), parseFloat(lon)];
-      if (therapistMarker) map.removeLayer(therapistMarker);
-      therapistMarker = L.marker(pos, {
-        icon: L.icon({
-          iconUrl: "https://maps.gstatic.com/mapfiles/ms2/micons/blue-dot.png",
-          iconSize: [32, 32],
-          iconAnchor: [16, 32]
-        })
-      }).addTo(map).bindPopup(`<b>Therapist</b><br>${display_name}`).openPopup();
-      map.setView(pos, 7);
-      const R = 6371;
-      const deg2rad = d => d * Math.PI / 180;
-      const results = [];
-      for (const m of markers) {
-        const lat1 = pos[0], lon1 = pos[1];
-        const lat2 = m.marker.getLatLng().lat;
-        const lon2 = m.marker.getLatLng().lng;
-        const dLat = deg2rad(lat2 - lat1);
-        const dLon = deg2rad(lon2 - lon1);
-        const a = Math.sin(dLat/2)**2 + Math.cos(deg2rad(lat1))*Math.cos(deg2rad(lat2))*Math.sin(dLon/2)**2;
-        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-        const dist = (R * c).toFixed(1);
-        results.push({ name: m.name, dist });
+
+    // Therapist distance logic
+    document.getElementById("therapistBtn").addEventListener("click", async () => {
+      const input = document.getElementById("therapistInput");
+      let query = input.value.trim();
+      if (!query) {
+        alert("Please enter a ZIP code or full U.S. address.");
+        input.style.border = "2px solid red";
+        setTimeout(() => (input.style.border = ""), 1500);
+        return;
       }
-      results.sort((a,b)=>a.dist-b.dist);
-      let listHtml = `<b>Distances from ${display_name} (closest first):</b><br><br>`;
-      for (const r of results) listHtml += `${r.name} — <b>${r.dist} km</b><br>`;
-      document.getElementById("distanceResults").innerHTML = listHtml;
-    } catch (err) {
-      console.error("Therapist search failed", err);
-      alert("Search failed — try again.");
-    }
-  });
+      if (!/usa|united states/i.test(query)) query += ", USA";
+      try {
+        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&countrycodes=us&limit=1&q=${encodeURIComponent(query)}`);
+        const data = await res.json();
+        if (!data.length) return alert("Address not found");
+        const { lat, lon, display_name } = data[0];
+        const pos = [parseFloat(lat), parseFloat(lon)];
+        if (therapistMarker) map.removeLayer(therapistMarker);
+        therapistMarker = L.marker(pos, {
+          icon: L.icon({
+            iconUrl: "https://maps.gstatic.com/mapfiles/ms2/micons/blue-dot.png",
+            iconSize: [32, 32],
+            iconAnchor: [16, 32]
+          })
+        }).addTo(map).bindPopup(`<b>Therapist</b><br>${display_name}`).openPopup();
+        map.setView(pos, 7);
 
-  // ===============================
-  // SOCKET.IO SYNC EVENTS
-  // ===============================
-  socket.on("workerAdded", (worker) => addWorker(worker, false));
-  socket.on("workerRemoved", (worker) => removeWorker(worker));
-  socket.on("allCleared", () => {
-    document.getElementById("facilityList").innerHTML = "";
-    for (const m of markers) map.removeLayer(m.marker);
-    markers.length = 0;
-  });
-  socket.on("currentWorkers", (workerList) => {
-    for (const w of workerList) addWorker(w, false);
-  });
+        const R = 6371;
+        const deg2rad = d => d * Math.PI / 180;
+        const results = [];
+        for (const m of markers) {
+          const lat1 = pos[0], lon1 = pos[1];
+          const lat2 = m.marker.getLatLng().lat;
+          const lon2 = m.marker.getLatLng().lng;
+          const dLat = deg2rad(lat2 - lat1);
+          const dLon = deg2rad(lon2 - lon1);
+          const a = Math.sin(dLat/2)**2 + Math.cos(deg2rad(lat1))*Math.cos(deg2rad(lat2))*Math.sin(dLon/2)**2;
+          const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+          const dist = (R * c).toFixed(1);
+          results.push({ name: m.name, dist });
+        }
+        results.sort((a,b)=>a.dist-b.dist);
+        let listHtml = `<b>Distances from ${display_name} (closest first):</b><br><br>`;
+        for (const r of results) listHtml += `${r.name} — <b>${r.dist} km</b><br>`;
+        document.getElementById("distanceResults").innerHTML = listHtml;
+      } catch (err) {
+        console.error("Therapist search failed", err);
+        alert("Search failed — try again.");
+      }
+    });
 
-  // ===============================
-  // FIT MAP TO ALL MARKERS
-  // ===============================
-  function fitAllMarkers() {
-    if (markers.length === 0) return;
-    const group = new L.featureGroup(markers.map(m => m.marker));
-    map.fitBounds(group.getBounds().pad(0.3));
-  }
-});
-</script>
-
+    // Real-time sync
+    socket.on("workerAdded", (worker) => addWorker(worker, false));
+    socket.on("workerRemoved", (worker) => removeWorker(worker));
+    socket.on("allCleared", () => {
+      document.getElementById("facilityList").innerHTML = "";
+      for (const m of markers) map.removeLayer(m.marker);
+      markers.length = 0;
+    });
+    socket.on("currentWorkers", (workerList) => {
+      for (const w of workerList) addWorker(w, false);
+    });
+  });
   </script>
 </body>
 </html>
-
-
-
-
