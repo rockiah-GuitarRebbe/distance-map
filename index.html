@@ -108,14 +108,16 @@
 <body>
   <div class="sidebar">
     <header>
-      <h3>Loaded Workers</h3>
-      <div>
-        <input type="file" id="excelInput" accept=".xlsx,.xls" style="display:none" />
-        <button id="uploadExcelBtn">📂 Excel</button>
-        <button id="addWorkerBtn">➕ Add</button>
-        <button id="clearListBtn" style="background:#e74c3c;">🧹 Clear</button>
-      </div>
-    </header>
+  <h3>Loaded Workers</h3>
+  <div>
+    <!-- hidden Excel input -->
+    <input type="file" id="excelInput" accept=".xlsx,.xls" style="display:none" />
+    <!-- visible buttons -->
+    <button id="uploadExcelBtn">📂 Excel</button>
+    <button id="addWorkerBtn">➕ Add</button>
+    <button id="clearListBtn" style="background:#e74c3c;">🧹 Clear</button>
+  </div>
+</header>
 
     <!-- Therapist search box -->
     <div style="padding:10px; border-bottom:1px solid #ddd;">
@@ -145,9 +147,20 @@
   </div>
 
   <script>
-    window.addEventListener("load", () => {
-    const socket = io(window.location.origin, {
+   window.addEventListener("load", () => {
+
+// ✅ Excel button opens hidden file input
+const excelBtn = document.getElementById("uploadExcelBtn");
+const excelInput = document.getElementById("excelInput");
+excelBtn.addEventListener("click", () => {
+  excelInput.click();
+});
+
+// rest of your code continues...
+const socket = io(window.location.origin, {
   transports: ["websocket", "polling"]
+});
+
 });
 
       const map = L.map('map').setView([39.8283, -98.5795], 4);
@@ -363,5 +376,6 @@
   </script>
 </body>
 </html>
+
 
 
