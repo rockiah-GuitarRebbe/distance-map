@@ -219,21 +219,24 @@
     });
 
     async function uploadRows(rows) {
-      cancelUpload = false;
-      for (const row of rows) {
-        if (cancelUpload) break;
-        const keys = Object.keys(row);
-        if (keys.length < 2) continue;
-        const name = row[keys[0]];
-        const address = row[keys[1]];
-        if (!name || !address) continue;
-        const worker = { name, address };
-        addWorker(worker, true);
-        socket.emit("addWorker", worker);
-        await new Promise(r => setTimeout(r, 2500));
-      }
-      fitAllMarkers();
-    }
+  cancelUpload = false;
+  for (const row of rows) {
+    if (cancelUpload) break;
+    const keys = Object.keys(row);
+    if (keys.length < 2) continue;
+    const name = row[keys[0]];
+    const address = row[keys[1]];
+    if (!name || !address) continue;
+
+    const worker = { name, address };
+    // 👉 only tell the server, don't add locally yet
+    socket.emit("addWorker", worker);
+
+    // small delay to respect the geocoding rate limits
+    await new Promise(r => setTimeout(r, 2000));
+  }
+}
+
 
     async function addWorker(worker, scrollToMarker) {
       if (cancelUpload) return;
@@ -353,3 +356,4 @@
   </script>
 </body>
 </html>
+
