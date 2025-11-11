@@ -13,21 +13,17 @@ const PORT = process.env.PORT || 3000;
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// serve static files
 app.use(express.static(__dirname));
+app.get("/", (req, res) => res.sendFile(path.join(__dirname, "index.html")));
 
-app.get("/", (req, res) => {
-  res.sendFile(path.join(__dirname, "index.html"));
-});
-
-// persistent worker + therapist state
 const DATA_FILE = path.join(__dirname, "workers.json");
+
+// === Load or initialize persistent data ===
 let workers = [];
 let therapist = null;
-
 if (fs.existsSync(DATA_FILE)) {
   try {
-    const saved = JSON.parse(fs.readFileSync(DATA_FILE));
+    const saved = JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
     workers = saved.workers || [];
     therapist = saved.therapist || null;
   } catch {
@@ -40,9 +36,10 @@ function saveData() {
   fs.writeFileSync(DATA_FILE, JSON.stringify({ workers, therapist }, null, 2));
 }
 
-// socket.io logic
+// === WebSocket logic ===
 io.on("connection", (socket) => {
-  console.log("🟢 New client connected");
+  console.log("🟢 Client connected");
+  // send complete current state
   socket.emit("initData", { workers, therapist });
 
   socket.on("addWorker", (worker) => {
@@ -59,13 +56,6 @@ io.on("connection", (socket) => {
     io.emit("workerRemoved", worker);
   });
 
-  socket.on("clearAll", () => {
-    workers = [];
-    therapist = null;
-    saveData();
-    io.emit("allCleared");
-  });
-
   socket.on("setTherapist", (t) => {
     therapist = t;
     saveData();
@@ -76,6 +66,13 @@ io.on("connection", (socket) => {
     therapist = null;
     saveData();
     io.emit("therapistCleared");
+  });
+
+  socket.on("clearAll", () => {
+    workers = [];
+    therapist = null;
+    saveData();
+    io.emit("allCleared");
   });
 
   socket.on("disconnect", () => console.log("🔴 Client disconnected"));
