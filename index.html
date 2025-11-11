@@ -45,6 +45,7 @@
     </div>
     <ul id="facilityList"></ul>
   </div>
+
   <div id="map"></div>
 
   <script>
@@ -54,10 +55,34 @@
 
     const markers = [];
     let therapistMarker = null;
+    let cancelUpload = false;
 
-    // Add worker marker
-    function addWorker(worker, broadcast=true) {
+    // 🧠 Throttled geocoder
+    async function geocodeAddress(address, attempt = 1) {
+      try {
+        const res = await fetch(
+          `https://nominatim.openstreetmap.org/search?format=json&countrycodes=us&limit=1&q=${encodeURIComponent(address)}`
+        );
+        if (!res.ok) throw new Error(res.statusText);
+        const data = await res.json();
+        if (data.length) return data[0];
+        throw new Error("no results");
+      } catch (e) {
+        if (attempt === 1) {
+          console.warn(`Retrying ${address}…`);
+          await new Promise(r => setTimeout(r, 2000));
+          return geocodeAddress(address, 2);
+        }
+        console.error(`❌ ${address}: ${e.message}`);
+        return null;
+      }
+    }
+
+    // 🧩 Worker management
+    async function addWorker(worker, broadcast = true) {
+      if (cancelUpload) return;
       if (document.querySelector(`li[data-name="${worker.name}"][data-address="${worker.address}"]`)) return;
+
       const li = document.createElement("li");
       li.dataset.name = worker.name;
       li.dataset.address = worker.address;
@@ -68,92 +93,111 @@
       li.append(del);
       li.append(document.createTextNode(`${worker.name} — ${worker.address}`));
       document.getElementById("facilityList").append(li);
-      fetch(`https://nominatim.openstreetmap.org/search?format=json&countrycodes=us&limit=1&q=${encodeURIComponent(worker.address)}`)
-        .then(r=>r.json())
-        .then(data=>{
-          if(data.length){
-            const {lat,lon}=data[0];
-            const m=L.marker([lat,lon]).addTo(map).bindPopup(`<b>${worker.name}</b><br>${worker.address}`);
-            markers.push({name:worker.name,address:worker.address,marker:m});
-          }
-        });
-      if(broadcast) socket.emit("addWorker", worker);
+
+      console.log(`📍 Geocoding: ${worker.address}`);
+      const data = await geocodeAddress(worker.address);
+      if (cancelUpload) return;
+      if (data) {
+        const { lat, lon } = data;
+        const m = L.marker([lat, lon]).addTo(map)
+          .bindPopup(`<b>${worker.name}</b><br>${worker.address}`);
+        markers.push({ name: worker.name, address: worker.address, marker: m });
+      }
+      if (broadcast) socket.emit("addWorker", worker);
     }
 
-    function removeWorker(worker){
-      const li=document.querySelector(`li[data-name="${worker.name}"][data-address="${worker.address}"]`);
-      if(li) li.remove();
-      const i=markers.findIndex(m=>m.name===worker.name&&m.address===worker.address);
-      if(i>=0){ map.removeLayer(markers[i].marker); markers.splice(i,1); }
+    function removeWorker(worker) {
+      const li = document.querySelector(`li[data-name="${worker.name}"][data-address="${worker.address}"]`);
+      if (li) li.remove();
+      const i = markers.findIndex(m => m.name === worker.name && m.address === worker.address);
+      if (i >= 0) { map.removeLayer(markers[i].marker); markers.splice(i,1); }
     }
 
-    // Therapist functions
-    function setTherapistMarker(t){
-      if(!t)return;
-      if(therapistMarker) map.removeLayer(therapistMarker);
-      therapistMarker=L.marker([t.lat,t.lon],{
-        icon:L.icon({iconUrl:"https://maps.gstatic.com/mapfiles/ms2/micons/blue-dot.png",iconSize:[32,32],iconAnchor:[16,32]})
+    function setTherapistMarker(t) {
+      if (!t) return;
+      if (therapistMarker) map.removeLayer(therapistMarker);
+      therapistMarker = L.marker([t.lat, t.lon], {
+        icon: L.icon({ iconUrl: "https://maps.gstatic.com/mapfiles/ms2/micons/blue-dot.png", iconSize: [32, 32], iconAnchor: [16, 32] })
       }).addTo(map).bindPopup(`<b>Therapist</b><br>${t.display_name}`).openPopup();
-      map.setView([t.lat,t.lon],7);
-      document.getElementById("therapistInput").value=t.display_name;
+      map.setView([t.lat, t.lon], 7);
+      document.getElementById("therapistInput").value = t.display_name;
     }
 
-    // Excel upload
-    document.getElementById("uploadExcelBtn").onclick=()=>document.getElementById("excelInput").click();
-    document.getElementById("excelInput").addEventListener("change",e=>{
-      const f=e.target.files[0]; if(!f)return;
-      const r=new FileReader();
-      r.onload=ev=>{
-        const wb=XLSX.read(new Uint8Array(ev.target.result),{type:"array"});
-        const sheet=wb.Sheets[wb.SheetNames[0]];
-        XLSX.utils.sheet_to_json(sheet).forEach(row=>{
-          const keys=Object.keys(row);
-          if(keys.length>=2)addWorker({name:row[keys[0]],address:row[keys[1]]});
-        });
+    // 📂 Excel upload (with throttling)
+    document.getElementById("uploadExcelBtn").onclick = () => document.getElementById("excelInput").click();
+    document.getElementById("excelInput").addEventListener("change", async (e) => {
+      const file = e.target.files[0]; if (!file) return;
+      const r = new FileReader();
+      r.onload = async (ev) => {
+        const wb = XLSX.read(new Uint8Array(ev.target.result), { type: "array" });
+        const sheet = wb.Sheets[wb.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(sheet);
+        let i = 0;
+        cancelUpload = false;
+        for (const row of rows) {
+          if (cancelUpload) break;
+          const keys = Object.keys(row);
+          if (keys.length < 2) continue;
+          const name = row[keys[0]];
+          const address = row[keys[1]];
+          if (!name || !address) continue;
+          i++;
+          console.log(`⏳ (${i}/${rows.length}) ${address}`);
+          await addWorker({ name, address });
+          await new Promise(r => setTimeout(r, 1000));
+        }
       };
-      r.readAsArrayBuffer(f);
+      r.readAsArrayBuffer(file);
     });
 
-    document.getElementById("therapistBtn").onclick=async()=>{
-      const q=document.getElementById("therapistInput").value.trim();
-      if(!q)return alert("Enter a location first.");
-      const res=await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(q+", USA")}`);
-      const data=await res.json(); if(!data.length)return alert("Not found");
-      const {lat,lon,display_name}=data[0];
-      setTherapistMarker({lat,lon,display_name});
-      socket.emit("setTherapist",{lat,lon,display_name});
+    // 📍 Therapist buttons
+    document.getElementById("therapistBtn").onclick = async () => {
+      const q = document.getElementById("therapistInput").value.trim();
+      if (!q) return alert("Enter a location first.");
+      const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(q + ", USA")}`);
+      const data = await res.json();
+      if (!data.length) return alert("Not found");
+      const { lat, lon, display_name } = data[0];
+      const t = { lat, lon, display_name };
+      setTherapistMarker(t);
+      socket.emit("setTherapist", t);
     };
 
-    document.getElementById("clearTherapistBtn").onclick=()=>{
-      if(therapistMarker){ map.removeLayer(therapistMarker); therapistMarker=null; }
+    document.getElementById("clearTherapistBtn").onclick = () => {
+      if (therapistMarker) { map.removeLayer(therapistMarker); therapistMarker = null; }
+      document.getElementById("therapistInput").value = "";
       socket.emit("clearTherapist");
     };
 
-    document.getElementById("clearListBtn").onclick=()=>{
-      if(!confirm("Clear all?"))return;
-      markers.forEach(m=>map.removeLayer(m.marker));
-      markers.length=0;
-      document.getElementById("facilityList").innerHTML="";
-      if(therapistMarker){map.removeLayer(therapistMarker);therapistMarker=null;}
+    // 🧹 Clear all
+    document.getElementById("clearListBtn").onclick = () => {
+      if (!confirm("Clear all workers and therapist?")) return;
+      cancelUpload = true;
+      markers.forEach(m => map.removeLayer(m.marker));
+      markers.length = 0;
+      document.getElementById("facilityList").innerHTML = "";
+      if (therapistMarker) { map.removeLayer(therapistMarker); therapistMarker = null; }
       socket.emit("clearAll");
     };
 
-    // Socket events
-    socket.on("initData",({workers,therapist})=>{
-      workers.forEach(w=>addWorker(w,false));
-      if(therapist) setTherapistMarker(therapist);
+    // 🔁 Socket sync
+    socket.on("initData", ({ workers, therapist }) => {
+      workers.forEach(w => addWorker(w, false));
+      if (therapist) setTherapistMarker(therapist);
     });
-    socket.on("workerAdded",w=>addWorker(w,false));
-    socket.on("workerRemoved",w=>removeWorker(w));
-    socket.on("allCleared",()=>{
-      markers.forEach(m=>map.removeLayer(m.marker)); markers.length=0;
-      document.getElementById("facilityList").innerHTML="";
-      if(therapistMarker){map.removeLayer(therapistMarker); therapistMarker=null;}
+    socket.on("workerAdded", w => addWorker(w, false));
+    socket.on("workerRemoved", w => removeWorker(w));
+    socket.on("allCleared", () => {
+      cancelUpload = true;
+      markers.forEach(m => map.removeLayer(m.marker)); markers.length = 0;
+      document.getElementById("facilityList").innerHTML = "";
+      if (therapistMarker) { map.removeLayer(therapistMarker); therapistMarker = null; }
+      document.getElementById("therapistInput").value = "";
     });
-    socket.on("therapistUpdated",t=>setTherapistMarker(t));
-    socket.on("therapistCleared",()=>{
-      if(therapistMarker){map.removeLayer(therapistMarker); therapistMarker=null;}
-      document.getElementById("therapistInput").value="";
+    socket.on("therapistUpdated", t => setTherapistMarker(t));
+    socket.on("therapistCleared", () => {
+      if (therapistMarker) { map.removeLayer(therapistMarker); therapistMarker = null; }
+      document.getElementById("therapistInput").value = "";
     });
   </script>
 </body>
