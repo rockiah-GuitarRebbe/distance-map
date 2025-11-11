@@ -11,30 +11,44 @@
     body { margin:0; display:flex; height:100vh; font-family:system-ui,Arial,sans-serif; }
     .sidebar { width:25%; min-width:260px; background:#f8f8f8; border-right:1px solid #ccc; display:flex; flex-direction:column; }
     #map { flex:1; height:100vh; }
-    header { padding:10px; background:#fafafa; border-bottom:1px solid #ddd; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px; }
+    header { padding:10px; background:#fafafa; border-bottom:1px solid #ddd; display:flex; flex-direction:column; align-items:flex-start; gap:6px; }
+    .header-top { width:100%; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px; }
     #facilityList { list-style:none; padding:10px; margin:0; overflow-y:auto; flex:1; }
     #facilityList li { display:flex; align-items:center; justify-content:flex-start; gap:6px; padding:4px 0; border-bottom:1px solid #eee; font-size:14px; }
     button { border:none; border-radius:5px; padding:6px 10px; background:#0078d4; color:white; cursor:pointer; }
     button:hover { background:#005fa3; }
     .delete-btn { background:transparent; color:#d33; font-size:18px; cursor:pointer; padding:0 4px; }
     .delete-btn:hover { color:#a00; transform:scale(1.1); }
-    .share-toggle { margin-left:8px; font-size:13px; color:#333; }
+    .share-toggle { font-size:13px; color:#333; margin-top:4px; }
+    input[type="text"] { padding:6px; width:90%; border:1px solid #ccc; border-radius:4px; }
+    small.note { color:#666; font-size:12px; margin-left:4px; }
   </style>
 </head>
 <body>
   <div class="sidebar">
     <header>
-      <h3>Workers</h3>
-      <div>
-        <input type="file" id="excelInput" accept=".xlsx,.xls" style="display:none" />
-        <button id="uploadExcelBtn">📂 Excel</button>
-        <button id="clearListBtn" style="background:#e74c3c;">🧹 Clear</button>
+      <div class="header-top">
+        <h3>Workers</h3>
+        <div>
+          <input type="file" id="excelInput" accept=".xlsx,.xls" style="display:none" />
+          <button id="uploadExcelBtn">📂 Excel</button>
+          <button id="clearListBtn" style="background:#e74c3c;">🧹 Clear</button>
+        </div>
       </div>
-      <label class="share-toggle">
+
+      <label class="share-toggle" title="If unchecked, new entries stay private to this browser.">
         <input type="checkbox" id="shareToggle" checked />
         Share my additions with everyone
       </label>
+      <small class="note">Applies only to new uploads or additions.</small>
     </header>
+
+    <div style="padding:10px;border-bottom:1px solid #ddd;">
+      <b>Add Worker Manually:</b><br />
+      <input type="text" id="workerName" placeholder="Name" /><br /><br />
+      <input type="text" id="workerAddress" placeholder="Address" /><br /><br />
+      <button id="addWorkerBtn">➕ Add Worker</button>
+    </div>
 
     <div style="padding:10px;border-bottom:1px solid #ddd;">
       <label><b>Therapist Location:</b></label><br />
@@ -97,6 +111,17 @@
       const i=arr.findIndex(m=>m.name===worker.name&&m.address===worker.address);
       if(i>=0){ map.removeLayer(arr[i].marker); arr.splice(i,1); }
     }
+
+    // Manual add
+    document.getElementById("addWorkerBtn").onclick=()=>{
+      const name=document.getElementById("workerName").value.trim();
+      const address=document.getElementById("workerAddress").value.trim();
+      if(!name||!address)return alert("Enter name and address.");
+      addWorker({name,address},true,shareToggle.checked);
+      document.getElementById("workerName").value="";
+      document.getElementById("workerAddress").value="";
+      document.getElementById("workerName").focus();
+    };
 
     // Therapist
     function setTherapistMarker(t){
