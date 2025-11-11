@@ -13,72 +13,72 @@ const PORT = process.env.PORT || 3000;
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Serve static files (Render-safe)
+// serve static files
 app.use(express.static(__dirname));
 
 app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "index.html"));
 });
 
-// === Data Storage ===
+// persistent worker + therapist state
 const DATA_FILE = path.join(__dirname, "workers.json");
 let workers = [];
-let therapist = null; // new!
+let therapist = null;
 
 if (fs.existsSync(DATA_FILE)) {
   try {
-    workers = JSON.parse(fs.readFileSync(DATA_FILE));
+    const saved = JSON.parse(fs.readFileSync(DATA_FILE));
+    workers = saved.workers || [];
+    therapist = saved.therapist || null;
   } catch {
     workers = [];
+    therapist = null;
   }
 }
 
-function saveWorkers() {
-  fs.writeFileSync(DATA_FILE, JSON.stringify(workers, null, 2));
+function saveData() {
+  fs.writeFileSync(DATA_FILE, JSON.stringify({ workers, therapist }, null, 2));
 }
 
-// === Socket logic ===
+// socket.io logic
 io.on("connection", (socket) => {
   console.log("🟢 New client connected");
-  socket.emit("currentWorkers", workers);
-  if (therapist) socket.emit("therapistSet", therapist);
+  socket.emit("initData", { workers, therapist });
 
-  // Add worker
   socket.on("addWorker", (worker) => {
     workers.push(worker);
-    saveWorkers();
+    saveData();
     io.emit("workerAdded", worker);
   });
 
-  // Remove worker
   socket.on("removeWorker", (worker) => {
     workers = workers.filter(
       (w) => !(w.name === worker.name && w.address === worker.address)
     );
-    saveWorkers();
+    saveData();
     io.emit("workerRemoved", worker);
   });
 
-  // Clear all
   socket.on("clearAll", () => {
     workers = [];
     therapist = null;
-    saveWorkers();
-    io.emit("cancelUploads");
-    setTimeout(() => io.emit("allCleared"), 1000);
+    saveData();
+    io.emit("allCleared");
   });
 
-  // Therapist set / cleared
-  socket.on("setTherapist", (tData) => {
-    therapist = tData;
-    io.emit("therapistSet", tData);
+  socket.on("setTherapist", (t) => {
+    therapist = t;
+    saveData();
+    io.emit("therapistUpdated", therapist);
   });
+
   socket.on("clearTherapist", () => {
     therapist = null;
+    saveData();
     io.emit("therapistCleared");
   });
 
   socket.on("disconnect", () => console.log("🔴 Client disconnected"));
 });
 
-server.listen(PORT, () => console.log(`🌎 Live on port ${PORT}`));
+server.listen(PORT, () => console.log(`🌎 Server running on port ${PORT}`));
