@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Distance Map — Shared Therapist & Workers</title>
+  <title>Shared Distance Map</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
@@ -48,34 +48,36 @@
   <div id="map"></div>
 
   <script>
-    const socket = io(window.location.origin, { transports:["websocket","polling"] });
+    const socket = io(window.location.origin, { transports: ["websocket","polling"] });
     const map = L.map('map').setView([39.8283, -98.5795], 4);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
 
     const markers = [];
     let therapistMarker = null;
 
+    // Add worker marker
     function addWorker(worker, broadcast=true) {
       if (document.querySelector(`li[data-name="${worker.name}"][data-address="${worker.address}"]`)) return;
-      const li=document.createElement("li");
-      li.dataset.name=worker.name;
-      li.dataset.address=worker.address;
-      const del=document.createElement("button");
-      del.textContent="×";
-      del.className="delete-btn";
-      del.onclick=()=>{ removeWorker(worker); socket.emit("removeWorker",worker); };
+      const li = document.createElement("li");
+      li.dataset.name = worker.name;
+      li.dataset.address = worker.address;
+      const del = document.createElement("button");
+      del.textContent = "×";
+      del.className = "delete-btn";
+      del.onclick = () => { removeWorker(worker); socket.emit("removeWorker", worker); };
       li.append(del);
       li.append(document.createTextNode(`${worker.name} — ${worker.address}`));
       document.getElementById("facilityList").append(li);
       fetch(`https://nominatim.openstreetmap.org/search?format=json&countrycodes=us&limit=1&q=${encodeURIComponent(worker.address)}`)
-        .then(r=>r.json()).then(data=>{
+        .then(r=>r.json())
+        .then(data=>{
           if(data.length){
             const {lat,lon}=data[0];
             const m=L.marker([lat,lon]).addTo(map).bindPopup(`<b>${worker.name}</b><br>${worker.address}`);
             markers.push({name:worker.name,address:worker.address,marker:m});
           }
         });
-      if(broadcast) socket.emit("addWorker",worker);
+      if(broadcast) socket.emit("addWorker", worker);
     }
 
     function removeWorker(worker){
@@ -85,9 +87,21 @@
       if(i>=0){ map.removeLayer(markers[i].marker); markers.splice(i,1); }
     }
 
+    // Therapist functions
+    function setTherapistMarker(t){
+      if(!t)return;
+      if(therapistMarker) map.removeLayer(therapistMarker);
+      therapistMarker=L.marker([t.lat,t.lon],{
+        icon:L.icon({iconUrl:"https://maps.gstatic.com/mapfiles/ms2/micons/blue-dot.png",iconSize:[32,32],iconAnchor:[16,32]})
+      }).addTo(map).bindPopup(`<b>Therapist</b><br>${t.display_name}`).openPopup();
+      map.setView([t.lat,t.lon],7);
+      document.getElementById("therapistInput").value=t.display_name;
+    }
+
+    // Excel upload
     document.getElementById("uploadExcelBtn").onclick=()=>document.getElementById("excelInput").click();
     document.getElementById("excelInput").addEventListener("change",e=>{
-      const f=e.target.files[0]; if(!f) return;
+      const f=e.target.files[0]; if(!f)return;
       const r=new FileReader();
       r.onload=ev=>{
         const wb=XLSX.read(new Uint8Array(ev.target.result),{type:"array"});
@@ -106,10 +120,7 @@
       const res=await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(q+", USA")}`);
       const data=await res.json(); if(!data.length)return alert("Not found");
       const {lat,lon,display_name}=data[0];
-      if(therapistMarker) map.removeLayer(therapistMarker);
-      therapistMarker=L.marker([lat,lon],{icon:L.icon({iconUrl:"https://maps.gstatic.com/mapfiles/ms2/micons/blue-dot.png",iconSize:[32,32],iconAnchor:[16,32]})})
-        .addTo(map).bindPopup(`<b>Therapist</b><br>${display_name}`).openPopup();
-      map.setView([lat,lon],7);
+      setTherapistMarker({lat,lon,display_name});
       socket.emit("setTherapist",{lat,lon,display_name});
     };
 
@@ -119,15 +130,15 @@
     };
 
     document.getElementById("clearListBtn").onclick=()=>{
-      if(!confirm("Clear everything?"))return;
+      if(!confirm("Clear all?"))return;
       markers.forEach(m=>map.removeLayer(m.marker));
       markers.length=0;
       document.getElementById("facilityList").innerHTML="";
-      if(therapistMarker){map.removeLayer(therapistMarker); therapistMarker=null;}
+      if(therapistMarker){map.removeLayer(therapistMarker);therapistMarker=null;}
       socket.emit("clearAll");
     };
 
-    // SOCKET EVENTS
+    // Socket events
     socket.on("initData",({workers,therapist})=>{
       workers.forEach(w=>addWorker(w,false));
       if(therapist) setTherapistMarker(therapist);
@@ -144,15 +155,6 @@
       if(therapistMarker){map.removeLayer(therapistMarker); therapistMarker=null;}
       document.getElementById("therapistInput").value="";
     });
-
-    function setTherapistMarker(t){
-      if(therapistMarker) map.removeLayer(therapistMarker);
-      therapistMarker=L.marker([t.lat,t.lon],{
-        icon:L.icon({iconUrl:"https://maps.gstatic.com/mapfiles/ms2/micons/blue-dot.png",iconSize:[32,32],iconAnchor:[16,32]})
-      }).addTo(map).bindPopup(`<b>Therapist</b><br>${t.display_name}`).openPopup();
-      map.setView([t.lat,t.lon],7);
-      document.getElementById("therapistInput").value=t.display_name;
-    }
   </script>
 </body>
 </html>
