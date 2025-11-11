@@ -13,65 +13,41 @@ const PORT = process.env.PORT || 3000;
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// Serve static files (the HTML app)
 app.use(express.static(__dirname));
 app.get("/", (req, res) => res.sendFile(path.join(__dirname, "index.html")));
 
+// Shared data storage
 const DATA_FILE = path.join(__dirname, "workers.json");
-
-// === Load or initialize persistent data ===
 let workers = [];
-let therapist = null;
 if (fs.existsSync(DATA_FILE)) {
-  try {
-    const saved = JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
-    workers = saved.workers || [];
-    therapist = saved.therapist || null;
-  } catch {
-    workers = [];
-    therapist = null;
-  }
+  try { workers = JSON.parse(fs.readFileSync(DATA_FILE)); }
+  catch { workers = []; }
+}
+function saveWorkers() {
+  fs.writeFileSync(DATA_FILE, JSON.stringify(workers, null, 2));
 }
 
-function saveData() {
-  fs.writeFileSync(DATA_FILE, JSON.stringify({ workers, therapist }, null, 2));
-}
-
-// === WebSocket logic ===
+// Socket.io
 io.on("connection", (socket) => {
   console.log("🟢 Client connected");
-  // send complete current state
-  socket.emit("initData", { workers, therapist });
+  socket.emit("initData", { workers });
 
   socket.on("addWorker", (worker) => {
     workers.push(worker);
-    saveData();
+    saveWorkers();
     io.emit("workerAdded", worker);
   });
 
   socket.on("removeWorker", (worker) => {
-    workers = workers.filter(
-      (w) => !(w.name === worker.name && w.address === worker.address)
-    );
-    saveData();
+    workers = workers.filter(w => !(w.name === worker.name && w.address === worker.address));
+    saveWorkers();
     io.emit("workerRemoved", worker);
-  });
-
-  socket.on("setTherapist", (t) => {
-    therapist = t;
-    saveData();
-    io.emit("therapistUpdated", therapist);
-  });
-
-  socket.on("clearTherapist", () => {
-    therapist = null;
-    saveData();
-    io.emit("therapistCleared");
   });
 
   socket.on("clearAll", () => {
     workers = [];
-    therapist = null;
-    saveData();
+    saveWorkers();
     io.emit("allCleared");
   });
 
