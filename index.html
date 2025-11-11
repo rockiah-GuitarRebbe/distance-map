@@ -1,24 +1,24 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <title>Shared Distance Map — Focus View</title>
-  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
-  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
-  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-  <style>
-    body { margin:0; display:flex; height:100vh; font-family:system-ui,Arial,sans-serif; }
-    .sidebar { width:25%; min-width:260px; background:#f8f8f8; border-right:1px solid #ccc; display:flex; flex-direction:column; }
-    #map { flex:1; height:100vh; }
-    header { padding:10px; background:#fafafa; border-bottom:1px solid #ddd; display:flex; justify-content:space-between; align-items:center; }
-    #facilityList { list-style:none; padding:10px; margin:0; overflow-y:auto; flex:1; font-size:14px; }
-    #facilityList li { padding:5px; border-bottom:1px solid #eee; cursor:pointer; }
-    #facilityList li:hover { background:#eef; }
-    button { border:none; border-radius:5px; padding:6px 10px; background:#0078d4; color:white; cursor:pointer; }
-    button:hover { background:#005fa3; }
-    .delete-btn { background:transparent; color:#d33; font-size:18px; border:none; cursor:pointer; padding:0 4px; }
-  </style>
+<meta charset="UTF-8" />
+<title>Shared Distance Map</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<style>
+  body { margin:0; display:flex; height:100vh; font-family:system-ui,Arial,sans-serif; }
+  .sidebar { width:25%; min-width:260px; background:#f8f8f8; border-right:1px solid #ccc; display:flex; flex-direction:column; }
+  #map { flex:1; height:100vh; }
+  header { padding:10px; background:#fafafa; border-bottom:1px solid #ddd; display:flex; justify-content:space-between; align-items:center; }
+  #facilityList { list-style:none; padding:10px; margin:0; overflow-y:auto; flex:1; }
+  #facilityList li { display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid #eee; padding:4px 0; font-size:14px; }
+  .delete-btn { background:transparent; color:#d33; font-size:18px; border:none; cursor:pointer; }
+  .delete-btn:hover { color:#a00; }
+  button { border:none; border-radius:5px; padding:6px 10px; background:#0078d4; color:white; cursor:pointer; }
+  button:hover { background:#005fa3; }
+</style>
 </head>
 <body>
   <div class="sidebar">
@@ -31,148 +31,156 @@
       </div>
     </header>
 
-    <div style="padding:10px; border-bottom:1px solid #ddd;">
+    <div style="padding:10px;border-bottom:1px solid #ddd;">
       <label><b>Therapist Location:</b></label><br />
-      <input id="therapistInput" placeholder="Enter ZIP or address" style="width:90%; padding:6px;" />
-      <div style="margin-top:6px; display:flex; gap:5px;">
+      <input id="therapistInput" placeholder="Enter ZIP or address" style="width:90%;padding:6px;" />
+      <div style="margin-top:6px;display:flex;gap:5px;">
         <button id="therapistBtn">📍 Show</button>
         <button id="clearTherapistBtn" style="background:#888;">🧍‍♀️ Clear</button>
       </div>
     </div>
 
-    <div id="distanceResults" style="padding:10px; overflow-y:auto; flex:1; font-size:14px;">
+    <div id="distanceResults" style="padding:10px;font-size:14px;overflow-y:auto;max-height:200px;">
       <i>No therapist selected.</i>
     </div>
+    <ul id="facilityList"></ul>
   </div>
+
   <div id="map"></div>
 
-  <script>
-    const socket = io(window.location.origin, { transports: ["websocket", "polling"] });
-    const map = L.map('map').setView([39.8283, -98.5795], 4);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+<script>
+const socket = io(window.location.origin, { transports: ["websocket","polling"] });
+const map = L.map('map').setView([39.8283, -98.5795], 4);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
 
-    let therapistMarker = null;
-    let clientMarker = null;
-    const clients = [];
+let therapistMarker = null;
+let activeClientMarker = null;
+let workers = [];
 
-    // Upload Excel
-    document.getElementById("uploadExcelBtn").onclick = () => document.getElementById("excelInput").click();
-    document.getElementById("excelInput").addEventListener("change", e => {
-      const file = e.target.files[0];
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = evt => {
-        const data = new Uint8Array(evt.target.result);
-        const workbook = XLSX.read(data, { type: "array" });
-        const sheet = workbook.Sheets[workbook.SheetNames[0]];
-        const rows = XLSX.utils.sheet_to_json(sheet);
-        clients.length = 0;
-        rows.forEach(r => {
-          const keys = Object.keys(r);
-          if (keys.length >= 2) clients.push({ name: r[keys[0]], address: r[keys[1]] });
-        });
-        renderClientList();
-      };
-      reader.readAsArrayBuffer(file);
+// --- Excel Upload ---
+document.getElementById("uploadExcelBtn").onclick = () => document.getElementById("excelInput").click();
+document.getElementById("excelInput").addEventListener("change", e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  const reader = new FileReader();
+  reader.onload = ev => {
+    const wb = XLSX.read(new Uint8Array(ev.target.result), { type: "array" });
+    const sheet = wb.Sheets[wb.SheetNames[0]];
+    const json = XLSX.utils.sheet_to_json(sheet);
+    json.forEach(row => {
+      const keys = Object.keys(row);
+      if (keys.length >= 2) socket.emit("addWorker", { name: row[keys[0]], address: row[keys[1]] });
     });
+  };
+  reader.readAsArrayBuffer(f);
+});
 
-    // Show therapist
-    document.getElementById("therapistBtn").onclick = async () => {
-      const q = document.getElementById("therapistInput").value.trim();
-      if (!q) return alert("Please enter a ZIP code or address.");
-      const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=us&q=${encodeURIComponent(q)}`);
-      const data = await res.json();
-      if (!data.length) return alert("Address not found.");
-      const { lat, lon, display_name } = data[0];
-      if (therapistMarker) map.removeLayer(therapistMarker);
-      therapistMarker = L.marker([lat, lon], {
+// --- Therapist ---
+document.getElementById("therapistBtn").onclick = async () => {
+  const q = document.getElementById("therapistInput").value.trim();
+  if (!q) return alert("Enter a location first.");
+  const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&countrycodes=us&limit=1&q=${encodeURIComponent(q)}`);
+  const data = await res.json();
+  if (!data.length) return alert("Address not found");
+  const { lat, lon, display_name } = data[0];
+  if (therapistMarker) map.removeLayer(therapistMarker);
+  therapistMarker = L.marker([lat, lon], {
+    icon: L.icon({
+      iconUrl: "https://maps.gstatic.com/mapfiles/ms2/micons/blue-dot.png",
+      iconSize: [32, 32],
+      iconAnchor: [16, 32]
+    })
+  }).addTo(map).bindPopup(`<b>Therapist</b><br>${display_name}`).openPopup();
+  map.setView([lat, lon], 7);
+  updateDistances(lat, lon, display_name);
+};
+
+document.getElementById("clearTherapistBtn").onclick = () => {
+  if (therapistMarker) map.removeLayer(therapistMarker);
+  therapistMarker = null;
+  document.getElementById("therapistInput").value = "";
+  document.getElementById("distanceResults").innerHTML = "<i>No therapist selected.</i>";
+};
+
+// --- Show one client at a time ---
+function showClientMarker(worker) {
+  if (activeClientMarker) map.removeLayer(activeClientMarker);
+  fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(worker.address)}`)
+    .then(r => r.json())
+    .then(data => {
+      if (!data.length) return;
+      const { lat, lon } = data[0];
+      activeClientMarker = L.marker([lat, lon], {
         icon: L.icon({
-          iconUrl: "https://maps.gstatic.com/mapfiles/ms2/micons/blue-dot.png",
-          iconSize: [32, 32], iconAnchor: [16, 32]
+          iconUrl: "https://maps.gstatic.com/mapfiles/ms2/micons/orange-dot.png",
+          iconSize: [32, 32],
+          iconAnchor: [16, 32]
         })
-      }).addTo(map).bindPopup(`<b>Therapist</b><br>${display_name}`).openPopup();
+      }).addTo(map).bindPopup(`<b>${worker.name}</b><br>${worker.address}`).openPopup();
       map.setView([lat, lon], 7);
+    });
+}
 
-      // Calculate distances
-      await calculateDistances(lat, lon, display_name);
-    };
+// --- Distances ---
+function updateDistances(lat, lon, name) {
+  if (!workers.length) return;
+  const R = 6371, deg2rad = d => d * Math.PI / 180;
+  const distances = workers.map(w => {
+    const m = w.coords;
+    if (!m) return { name: w.name, dist: "?" };
+    const dLat = deg2rad(m.lat - lat);
+    const dLon = deg2rad(m.lon - lon);
+    const a = Math.sin(dLat/2)**2 + Math.cos(deg2rad(lat))*Math.cos(deg2rad(m.lat))*Math.sin(dLon/2)**2;
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    return { name: w.name, dist: (R*c).toFixed(1) };
+  }).sort((a,b)=>a.dist-b.dist);
 
-    // Clear therapist + distances
-    document.getElementById("clearTherapistBtn").onclick = () => {
-      if (therapistMarker) { map.removeLayer(therapistMarker); therapistMarker = null; }
-      if (clientMarker) { map.removeLayer(clientMarker); clientMarker = null; }
-      document.getElementById("distanceResults").innerHTML = "<i>No therapist selected.</i>";
-    };
+  let html = `<b>Distances from ${name}:</b><br><br>`;
+  distances.forEach(d => html += `<button style="background:none;color:#0078d4;border:none;text-align:left;cursor:pointer" onclick="showClientMarker(workers.find(w=>w.name==='${d.name}'))">${d.name} — <b>${d.dist} km</b></button><br>`);
+  document.getElementById("distanceResults").innerHTML = html;
+}
 
-    // Clear all
-    document.getElementById("clearListBtn").onclick = () => {
-      if (!confirm("Clear all clients and therapist?")) return;
-      if (therapistMarker) { map.removeLayer(therapistMarker); therapistMarker = null; }
-      if (clientMarker) { map.removeLayer(clientMarker); clientMarker = null; }
-      clients.length = 0;
-      document.getElementById("distanceResults").innerHTML = "<i>No therapist selected.</i>";
-      document.getElementById("therapistInput").value = "";
-    };
+// --- Clear all ---
+document.getElementById("clearListBtn").onclick = () => {
+  if (!confirm("Clear all clients?")) return;
+  socket.emit("clearAll");
+};
 
-    // Calculate and show distances
-    async function calculateDistances(lat, lon, display_name) {
-      const deg2rad = d => d * Math.PI / 180;
-      const R = 6371;
-      const enriched = [];
+// --- Socket events ---
+socket.on("initData", data => {
+  workers = [];
+  document.getElementById("facilityList").innerHTML = "";
+  data.workers.forEach(w => addWorkerToList(w));
+});
 
-      for (const c of clients) {
-        try {
-          const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=us&q=${encodeURIComponent(c.address)}`);
-          const data = await res.json();
-          if (!data.length) continue;
-          const { lat: lat2, lon: lon2 } = data[0];
-          const dLat = deg2rad(lat2 - lat);
-          const dLon = deg2rad(lon2 - lon);
-          const a = Math.sin(dLat/2)**2 + Math.cos(deg2rad(lat))*Math.cos(deg2rad(lat2))*Math.sin(dLon/2)**2;
-          const dist = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-          enriched.push({ ...c, lat: lat2, lon: lon2, dist: dist.toFixed(1) });
-        } catch (err) {
-          console.warn("Failed for", c.address);
-        }
-      }
+socket.on("workerAdded", w => addWorkerToList(w));
+socket.on("workerRemoved", w => removeWorkerFromList(w));
+socket.on("allCleared", () => {
+  workers = [];
+  document.getElementById("facilityList").innerHTML = "";
+  if (activeClientMarker) map.removeLayer(activeClientMarker);
+});
 
-      enriched.sort((a,b)=>a.dist-b.dist);
-      renderDistanceList(enriched, display_name);
-    }
-
-    function renderDistanceList(list, fromName) {
-      const div = document.getElementById("distanceResults");
-      if (!list.length) {
-        div.innerHTML = `<i>No clients found.</i>`;
-        return;
-      }
-      let html = `<b>Distances from ${fromName}:</b><br><br><ul id="facilityList">`;
-      list.forEach(c => {
-        html += `<li data-lat="${c.lat}" data-lon="${c.lon}" data-name="${c.name}" data-address="${c.address}">${c.name} — <b>${c.dist} km</b></li>`;
-      });
-      html += "</ul>";
-      div.innerHTML = html;
-
-      // Click to show pin
-      div.querySelectorAll("li").forEach(li => {
-        li.addEventListener("click", () => {
-          if (clientMarker) map.removeLayer(clientMarker);
-          const { lat, lon, name, address } = li.dataset;
-          clientMarker = L.marker([lat, lon], {
-            icon: L.icon({
-              iconUrl: "https://maps.gstatic.com/mapfiles/ms2/micons/orange-dot.png",
-              iconSize: [32, 32],
-              iconAnchor: [16, 32]
-            })
-          }).addTo(map).bindPopup(`<b>${name}</b><br>${address}`).openPopup();
-          map.setView([lat, lon], 9);
-        });
-      });
-    }
-
-    function renderClientList() {
-      document.getElementById("distanceResults").innerHTML = `<i>${clients.length} clients loaded. Enter a therapist to calculate distances.</i>`;
-    }
-  </script>
+// --- Helpers ---
+function addWorkerToList(w) {
+  if (!w.name || !w.address) return;
+  if (document.querySelector(`li[data-name="${w.name}"][data-address="${w.address}"]`)) return;
+  const li = document.createElement("li");
+  li.dataset.name = w.name;
+  li.dataset.address = w.address;
+  li.innerHTML = `<span>${w.name} — ${w.address}</span><button class="delete-btn">×</button>`;
+  li.querySelector(".delete-btn").onclick = () => socket.emit("removeWorker", w);
+  li.querySelector("span").onclick = () => showClientMarker(w);
+  document.getElementById("facilityList").appendChild(li);
+  fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(w.address)}`)
+    .then(r=>r.json()).then(d=>{ if(d.length){ w.coords={lat:+d[0].lat,lon:+d[0].lon}; }});
+  workers.push(w);
+}
+function removeWorkerFromList(w) {
+  const li = document.querySelector(`li[data-name="${w.name}"][data-address="${w.address}"]`);
+  if (li) li.remove();
+  workers = workers.filter(x => !(x.name === w.name && x.address === w.address));
+}
+</script>
 </body>
 </html>
