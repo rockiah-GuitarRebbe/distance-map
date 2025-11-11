@@ -2,53 +2,35 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Shared + Local Distance Map</title>
+  <title>Shared Distance Map</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <style>
-    body { margin:0; display:flex; height:100vh; font-family:system-ui,Arial,sans-serif; }
+    body { margin:0; display:flex; font-family:system-ui,Arial,sans-serif; height:100vh; }
     .sidebar { width:25%; min-width:260px; background:#f8f8f8; border-right:1px solid #ccc; display:flex; flex-direction:column; }
     #map { flex:1; height:100vh; }
-    header { padding:10px; background:#fafafa; border-bottom:1px solid #ddd; display:flex; flex-direction:column; align-items:flex-start; gap:6px; }
-    .header-top { width:100%; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px; }
+    header { padding:10px; background:#fafafa; border-bottom:1px solid #ddd; display:flex; justify-content:space-between; align-items:center; }
     #facilityList { list-style:none; padding:10px; margin:0; overflow-y:auto; flex:1; }
-    #facilityList li { display:flex; align-items:center; justify-content:flex-start; gap:6px; padding:4px 0; border-bottom:1px solid #eee; font-size:14px; }
+    #facilityList li { display:flex; align-items:center; justify-content:flex-start; gap:6px; padding:4px 0; border-bottom:1px solid #eee; font-size:14px; cursor:pointer; }
+    #facilityList li:hover { background:#f0f0f0; }
     button { border:none; border-radius:5px; padding:6px 10px; background:#0078d4; color:white; cursor:pointer; }
     button:hover { background:#005fa3; }
     .delete-btn { background:transparent; color:#d33; font-size:18px; cursor:pointer; padding:0 4px; }
     .delete-btn:hover { color:#a00; transform:scale(1.1); }
-    .share-toggle { font-size:13px; color:#333; margin-top:4px; }
-    input[type="text"] { padding:6px; width:90%; border:1px solid #ccc; border-radius:4px; }
-    small.note { color:#666; font-size:12px; margin-left:4px; }
   </style>
 </head>
 <body>
   <div class="sidebar">
     <header>
-      <div class="header-top">
-        <h3>Workers</h3>
-        <div>
-          <input type="file" id="excelInput" accept=".xlsx,.xls" style="display:none" />
-          <button id="uploadExcelBtn">📂 Excel</button>
-          <button id="clearListBtn" style="background:#e74c3c;">🧹 Clear</button>
-        </div>
+      <h3>Workers</h3>
+      <div>
+        <input type="file" id="excelInput" accept=".xlsx,.xls" style="display:none" />
+        <button id="uploadExcelBtn">📂 Excel</button>
+        <button id="clearListBtn" style="background:#e74c3c;">🧹 Clear</button>
       </div>
-
-      <label class="share-toggle" title="If unchecked, new entries stay private to this browser.">
-        <input type="checkbox" id="shareToggle" checked />
-        Share my additions with everyone
-      </label>
-      <small class="note">Applies only to new uploads or additions.</small>
     </header>
-
-    <div style="padding:10px;border-bottom:1px solid #ddd;">
-      <b>Add Worker Manually:</b><br />
-      <input type="text" id="workerName" placeholder="Name" /><br /><br />
-      <input type="text" id="workerAddress" placeholder="Address" /><br /><br />
-      <button id="addWorkerBtn">➕ Add Worker</button>
-    </div>
 
     <div style="padding:10px;border-bottom:1px solid #ddd;">
       <label><b>Therapist Location:</b></label><br />
@@ -72,56 +54,82 @@
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
 
     const markers = [];
-    const localMarkers = [];
     let therapistMarker = null;
-    const shareToggle = document.getElementById("shareToggle");
+    let selectedMarker = null;
 
     // Add worker marker
-    function addWorker(worker, broadcast=true, isShared=true) {
+    function addWorker(worker, broadcast=true) {
+      if (document.querySelector(`li[data-name="${worker.name}"][data-address="${worker.address}"]`)) return;
+      
       const li = document.createElement("li");
       li.dataset.name = worker.name;
       li.dataset.address = worker.address;
-      li.style.color = isShared ? "#000" : "#666";
 
       const del = document.createElement("button");
       del.textContent = "×";
       del.className = "delete-btn";
-      del.onclick = () => { removeWorker(worker, isShared); if(isShared) socket.emit("removeWorker", worker); };
-      li.append(del);
-      li.append(document.createTextNode(`${worker.name} — ${worker.address}${isShared?"":" (local)"}`));
+      del.onclick = (e) => {
+        e.stopPropagation();
+        removeWorker(worker);
+        socket.emit("removeWorker", worker);
+      };
+
+      const label = document.createElement("span");
+      label.textContent = `${worker.name} — ${worker.address}`;
+      li.append(del, label);
       document.getElementById("facilityList").append(li);
 
       fetch(`https://nominatim.openstreetmap.org/search?format=json&countrycodes=us&limit=1&q=${encodeURIComponent(worker.address)}`)
-        .then(r=>r.json())
-        .then(data=>{
-          if(data.length){
-            const {lat,lon}=data[0];
-            const m=L.marker([lat,lon]).addTo(map).bindPopup(`<b>${worker.name}</b><br>${worker.address}`);
-            const arr = isShared ? markers : localMarkers;
-            arr.push({name:worker.name,address:worker.address,marker:m});
+        .then(r => r.json())
+        .then(data => {
+          if (data.length) {
+            const { lat, lon } = data[0];
+            const icon = L.icon({
+              iconUrl: "https://maps.gstatic.com/mapfiles/ms2/micons/orange-dot.png",
+              iconSize: [32, 32],
+              iconAnchor: [16, 32]
+            });
+            const marker = L.marker([lat, lon], { icon }).addTo(map)
+              .bindPopup(`<b>${worker.name}</b><br>${worker.address}`);
+            markers.push({ name: worker.name, address: worker.address, marker });
+            // 🔸 click on list to pan & highlight
+            li.addEventListener("click", () => highlightMarker(worker));
           }
         });
-      if(broadcast && isShared) socket.emit("addWorker", worker);
+      if (broadcast) socket.emit("addWorker", worker);
     }
 
-    function removeWorker(worker, isShared){
-      const li=document.querySelector(`li[data-name="${worker.name}"][data-address="${worker.address}"]`);
-      if(li) li.remove();
-      const arr = isShared ? markers : localMarkers;
-      const i=arr.findIndex(m=>m.name===worker.name&&m.address===worker.address);
-      if(i>=0){ map.removeLayer(arr[i].marker); arr.splice(i,1); }
+    function highlightMarker(worker) {
+      const item = markers.find(m => m.name === worker.name && m.address === worker.address);
+      if (!item) return;
+      // reset previously selected marker
+      if (selectedMarker && selectedMarker !== item.marker) {
+        selectedMarker.setIcon(L.icon({
+          iconUrl: "https://maps.gstatic.com/mapfiles/ms2/micons/orange-dot.png",
+          iconSize: [32, 32],
+          iconAnchor: [16, 32]
+        }));
+      }
+      // set new selected
+      selectedMarker = item.marker;
+      selectedMarker.setIcon(L.icon({
+        iconUrl: "https://maps.gstatic.com/mapfiles/ms2/micons/red-dot.png",
+        iconSize: [32, 32],
+        iconAnchor: [16, 32]
+      }));
+      map.panTo(selectedMarker.getLatLng());
+      selectedMarker.openPopup();
     }
 
-    // Manual add
-    document.getElementById("addWorkerBtn").onclick=()=>{
-      const name=document.getElementById("workerName").value.trim();
-      const address=document.getElementById("workerAddress").value.trim();
-      if(!name||!address)return alert("Enter name and address.");
-      addWorker({name,address},true,shareToggle.checked);
-      document.getElementById("workerName").value="";
-      document.getElementById("workerAddress").value="";
-      document.getElementById("workerName").focus();
-    };
+    function removeWorker(worker) {
+      const li = document.querySelector(`li[data-name="${worker.name}"][data-address="${worker.address}"]`);
+      if (li) li.remove();
+      const i = markers.findIndex(m => m.name === worker.name && m.address === worker.address);
+      if (i >= 0) {
+        map.removeLayer(markers[i].marker);
+        markers.splice(i, 1);
+      }
+    }
 
     // Therapist
     function setTherapistMarker(t){
@@ -144,7 +152,7 @@
         const sheet=wb.Sheets[wb.SheetNames[0]];
         XLSX.utils.sheet_to_json(sheet).forEach(row=>{
           const keys=Object.keys(row);
-          if(keys.length>=2)addWorker({name:row[keys[0]],address:row[keys[1]]},true,shareToggle.checked);
+          if(keys.length>=2)addWorker({name:row[keys[0]],address:row[keys[1]]});
         });
       };
       r.readAsArrayBuffer(f);
@@ -157,45 +165,39 @@
       const data=await res.json(); if(!data.length)return alert("Not found");
       const {lat,lon,display_name}=data[0];
       setTherapistMarker({lat,lon,display_name});
-      computeDistances(lat,lon,display_name);
+      socket.emit("setTherapist",{lat,lon,display_name});
     };
 
-    function computeDistances(lat,lon,display_name){
-      const R=6371; const d2r=d=>d*Math.PI/180;
-      const results=[];
-      [...markers,...localMarkers].forEach(m=>{
-        const p=m.marker.getLatLng();
-        const dLat=d2r(p.lat-lat), dLon=d2r(p.lng-lon);
-        const a=Math.sin(dLat/2)**2+Math.cos(d2r(lat))*Math.cos(d2r(p.lat))*Math.sin(dLon/2)**2;
-        const c=2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
-        const dist=(R*c).toFixed(1);
-        results.push({name:m.name,dist});
-      });
-      results.sort((a,b)=>a.dist-b.dist);
-      document.getElementById("distanceResults").innerHTML=`<b>Distances from ${display_name}:</b><br><br>`+results.map(r=>`${r.name} — <b>${r.dist} km</b>`).join("<br>");
-    }
-
     document.getElementById("clearTherapistBtn").onclick=()=>{
-      if(therapistMarker){map.removeLayer(therapistMarker);therapistMarker=null;}
-      document.getElementById("therapistInput").value="";
-      document.getElementById("distanceResults").innerHTML="<i>No therapist selected.</i>";
+      if(therapistMarker){ map.removeLayer(therapistMarker); therapistMarker=null; }
+      socket.emit("clearTherapist");
     };
 
     document.getElementById("clearListBtn").onclick=()=>{
       if(!confirm("Clear all?"))return;
-      [...markers,...localMarkers].forEach(m=>map.removeLayer(m.marker));
-      markers.length=0; localMarkers.length=0;
+      markers.forEach(m=>map.removeLayer(m.marker));
+      markers.length=0;
       document.getElementById("facilityList").innerHTML="";
+      if(therapistMarker){map.removeLayer(therapistMarker);therapistMarker=null;}
       socket.emit("clearAll");
     };
 
-    // Socket sync events
-    socket.on("initData",({workers})=>workers.forEach(w=>addWorker(w,false,true)));
-    socket.on("workerAdded",w=>addWorker(w,false,true));
-    socket.on("workerRemoved",w=>removeWorker(w,true));
+    // Socket events
+    socket.on("initData",({workers,therapist})=>{
+      workers.forEach(w=>addWorker(w,false));
+      if(therapist) setTherapistMarker(therapist);
+    });
+    socket.on("workerAdded",w=>addWorker(w,false));
+    socket.on("workerRemoved",w=>removeWorker(w));
     socket.on("allCleared",()=>{
-      markers.forEach(m=>map.removeLayer(m.marker));markers.length=0;
+      markers.forEach(m=>map.removeLayer(m.marker)); markers.length=0;
       document.getElementById("facilityList").innerHTML="";
+      if(therapistMarker){map.removeLayer(therapistMarker); therapistMarker=null;}
+    });
+    socket.on("therapistUpdated",t=>setTherapistMarker(t));
+    socket.on("therapistCleared",()=>{
+      if(therapistMarker){map.removeLayer(therapistMarker); therapistMarker=null;}
+      document.getElementById("therapistInput").value="";
     });
   </script>
 </body>
