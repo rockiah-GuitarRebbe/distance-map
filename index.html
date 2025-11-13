@@ -1,37 +1,99 @@
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8" />
-  <title>Distance Viewer</title>
+<!-- Drop this into your current index.html changes -->
 
-  <!-- Leaflet -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+  // Reuse existing constants:
+  const LEVELS = ["critical","high","medium","low"];
+  const levelStyle = {
+    critical: { color:"#e53935", fillColor:"#e53935" },
+    high:     { color:"#fb8c00", fillColor:"#fb8c00" },
+    medium:   { color:"#fdd835", fillColor:"#fdd835" },
+    low:      { color:"#43a047", fillColor:"#43a047" },
+  };
 
-  <!-- Socket.IO -->
-  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  // ... your existing code ...
 
-  <style>
-    body { margin:0; display:flex; height:100vh; font-family:Arial,sans-serif; overflow:hidden; }
-    #sidebar { width:420px; background:#fafafa; border-right:1px solid #ddd; padding:14px; overflow-y:auto; }
-    #map { flex:1; }
+  function keyFor(c){ return `${(c.name||"").trim().toLowerCase()}|${(c.address||"").trim().toLowerCase()}|${c.level||"low"}`; }
 
-    .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-    button { cursor:pointer; }
-    .meta { font-size:12px; color:#555; }
-    .pill { display:inline-block; padding:2px 8px; border:1px solid #ccc; border-radius:999px; font-size:12px; background:#fff; }
+  function ensureMarker(c) {
+    const k = keyFor(c);
+    if (markersByKey.has(k)) return markersByKey.get(k);
+    const style = levelStyle[c.level] || levelStyle.low;
+    const m = L.circleMarker([c.lat, c.lng], { radius:7, weight:2, opacity:1, fillOpacity:0.9, ...style })
+      .bindPopup(`<b>${escapeHtml(c.name)}</b><br>${escapeHtml(c.address)}<br><span class="badge ${c.level}">${c.level}</span>`);
+    (layers[c.level] || layers.low).addLayer(m);
+    markersByKey.set(k, m);
+    return m;
+  }
 
-    .client { padding:8px; margin-bottom:8px; border:1px solid #ddd; border-radius:8px; background:#fff; display:flex; justify-content:space-between; gap:8px; }
-    .client:hover { background:#f3f6ff; }
-    .badge { padding:2px 8px; border-radius:999px; font-size:11px; color:#fff; text-transform:capitalize; }
-    .badge.critical { background:#e53935; }
-    .badge.high     { background:#fb8c00; }
-    .badge.medium   { background:#fdd835; color:#222; }
-    .badge.low      { background:#43a047; }
+  function removeMarker(c){
+    const k = keyFor(c);
+    const m = markersByKey.get(k);
+    if (m){ m.remove(); markersByKey.delete(k); }
+  }
 
-    .legend { display:flex; gap:10px; align-items:center; flex-wrap:wrap; font-size:12px; margin-top:8px; }
-    .dot { width:10px; height:10px; border-radius:50%; display:inline-block; }
-    .dot.critical{ background:#e53935; } .dot.high{ background:#fb8c00; }
-    .dot.medium{ background:#fdd835; border:1px solid #aaa; } .dot.low{ background:#43a047; }
-  </style>
-</hea
+  // NEW: change level in-place (no server change required)
+  function changeLevel(oldClient, newLevel){
+    const oldKey = keyFor(oldClient);
+    if (!clientKeys.has(oldKey)) return;
+
+    // Remove old marker + key
+    removeMarker(oldClient);
+    clientKeys.delete(oldKey);
+
+    // Create updated record
+    const updated = { ...oldClient, level: newLevel };
+
+    // Insert updated locally
+    const inserted = addLocal(updated); // adds marker + pushes to clients
+    if (!inserted) return;
+
+    // Persist/share by re-adding with new identity
+    // (remove old, add new) to keep server dedup happy
+    socket.emit("removeWorker", oldClient);
+    socket.emit("addWorker", updated);
+
+    // Re-render list
+    renderList();
+  }
+
+  // Patch renderList to include a level selector:
+  function renderList() {
+    counts.textContent = String(clients.length);
+    clientListDiv.innerHTML = "";
+
+    const arr = therapistLatLng
+      ? [...clients].sort((a,b) => calcDist(therapistLatLng,a) - calcDist(therapistLatLng,b))
+      : [...clients];
+
+    for (const c of arr) {
+      const miles = therapistLatLng ? calcDist(therapistLatLng, c).toFixed(1) : "—";
+      const row = document.createElement("div");
+      row.className = "client";
+      row.innerHTML = `
+        <div>
+          <div><b>${escapeHtml(c.name)}</b> <span class="badge ${c.level}">${c.level}</span></div>
+          <div class="meta">${escapeHtml(c.address)}</div>
+          <div class="meta"><b>${miles}</b> miles</div>
+        </div>
+        <div class="row">
+          <select data-action="level">
+            ${LEVELS.map(l => `<option value="${l}" ${l===c.level?'selected':''}>${l}</option>`).join('')}
+          </select>
+          <button data-action="fly">Pin</button>
+          <button data-action="delete" title="Remove (global)">🗑️</button>
+        </div>
+      `;
+      row.querySelector('[data-action="fly"]').onclick = () => {
+        const m = ensureMarker(c); map.setView(m.getLatLng(), 12); m.openPopup();
+      };
+      row.querySelector('[data-action="delete"]').onclick = () => socket.emit("removeWorker", c);
+      row.querySelector('[data-action="level"]').onchange = (e) => {
+        const newLevel = e.target.value;
+        if (newLevel !== c.level) changeLevel(c, newLevel);
+      };
+      clientListDiv.appendChild(row);
+    }
+  }
+
+  // keep the rest as you already have (upload with levelSelect, sockets, etc.)
+</script>
