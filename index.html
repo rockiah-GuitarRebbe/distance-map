@@ -5,91 +5,59 @@
   <title>Distance Viewer</title>
 
   <!-- Leaflet -->
-  <link
-    rel="stylesheet"
-    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-  />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
   <!-- Socket.IO -->
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
 
+  <!-- CSV & XLSX parsers (robust file handling) -->
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
   <style>
-    body {
-      margin: 0;
-      display: flex;
-      height: 100vh;
-      font-family: Arial, sans-serif;
-      overflow: hidden;
-    }
-
-    #sidebar {
-      width: 380px;
-      background: #f8f8f8;
-      border-right: 1px solid #ddd;
-      padding: 15px;
-      overflow-y: auto;
-    }
-
-    #map {
-      flex: 1;
-    }
-
-    .client {
-      padding: 8px;
-      margin-bottom: 6px;
-      border: 1px solid #ccc;
-      border-radius: 6px;
-      background: #fff;
-      cursor: pointer;
-    }
-
-    .client:hover {
-      background: #eee;
-    }
-
-    #therapistBox {
-      margin-bottom: 20px;
-      padding-bottom: 10px;
-      border-bottom: 1px solid #ddd;
-    }
-
-    #distancesTitle {
-      margin-top: 20px;
-      font-size: 18px;
-      font-weight: bold;
-    }
+    body { margin: 0; display: flex; height: 100vh; font-family: Arial, sans-serif; overflow: hidden; }
+    #sidebar { width: 380px; background: #f8f8f8; border-right: 1px solid #ddd; padding: 15px; overflow-y: auto; }
+    #map { flex: 1; }
+    .client { padding: 8px; margin-bottom: 6px; border: 1px solid #ccc; border-radius: 6px; background: #fff; cursor: pointer; }
+    .client:hover { background: #eee; }
+    #therapistBox { margin-bottom: 20px; padding-bottom: 10px; border-bottom: 1px solid #ddd; }
+    #distancesTitle { margin-top: 20px; font-size: 18px; font-weight: bold; }
+    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .muted { color: #666; font-size: 12px; }
+    .pill { display:inline-block; padding:2px 8px; border:1px solid #ccc; border-radius:999px; font-size:12px; background:#fff; }
+    progress { width: 100%; }
   </style>
 </head>
-
 <body>
   <!-- ================ SIDEBAR ================ -->
   <div id="sidebar">
-
     <!-- Therapist -->
     <div id="therapistBox">
       <b>Therapist Location</b><br />
-      <input
-        id="therapistInput"
-        type="text"
-        placeholder="Enter ZIP or address"
-        style="width: 100%; padding: 8px; margin-top: 4px;"
-      /><br />
-
-      <button id="setTherapistBtn" style="margin-top: 8px;">Set Therapist</button>
-      <button id="clearTherapistBtn">Clear</button>
+      <input id="therapistInput" type="text" placeholder="Enter ZIP or address" style="width: 100%; padding: 8px; margin-top: 4px;" /><br />
+      <div class="row" style="margin-top:8px;">
+        <button id="setTherapistBtn">Set Therapist</button>
+        <button id="clearTherapistBtn">Clear</button>
+        <span id="therapistStatus" class="muted"></span>
+      </div>
     </div>
 
     <!-- Upload + Clear -->
     <div>
       <b>Client List</b><br />
       <input type="file" id="excelInput" accept=".csv,.txt,.xlsx" /><br />
-
-      <input type="checkbox" id="shareToggle" checked />
-      <label for="shareToggle">Share my additions</label><br />
-      <small>(Applies to new uploads only)</small><br /><br />
-
-      <button id="clearAllBtn">Clear All Clients (Global)</button>
+      <label class="row" style="margin-top:6px;">
+        <input type="checkbox" id="shareToggle" checked />
+        <span>Share my additions</span>
+        <span class="muted">(applies to new uploads only)</span>
+      </label>
+      <div class="row" style="margin-top:6px;">
+        <button id="clearAllBtn">Clear All Clients (Global)</button>
+        <span id="counts" class="pill">0 clients</span>
+      </div>
+      <div id="importStatus" class="muted" style="margin-top:6px;"></div>
+      <progress id="importProgress" value="0" max="100" style="display:none;"></progress>
     </div>
 
     <!-- Distances -->
@@ -101,210 +69,260 @@
   <div id="map"></div>
 
   <script>
-    /* ===================================
-         SOCKET.IO (Render stable)
-       =================================== */
-    const socket = io("https://distance-map.onrender.com", {
-      transports: ["websocket"]
-    });
+    // ================= SOCKET =================
+    const socket = io("https://distance-map.onrender.com", { transports: ["websocket"] });
 
-    /* ===================================
-            LEAFLET MAP
-       =================================== */
+    // ================= MAP =================
     const map = L.map("map").setView([39.5, -98.35], 4); // USA
-
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      maxZoom: 19,
-    }).addTo(map);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19 }).addTo(map);
 
     let therapistMarker = null;
     let clientPin = null;
     let therapistLatLng = null;
+
+    // ================= STATE =================
+    /** Local cache. Dedup via key: name|address */
     let clients = [];
+    const clientKeys = new Set();
 
+    // ================= DOM =================
     const therapistInput = document.getElementById("therapistInput");
+    const therapistStatus = document.getElementById("therapistStatus");
     const clientListDiv = document.getElementById("clientList");
+    const counts = document.getElementById("counts");
+    const importStatus = document.getElementById("importStatus");
+    const importProgress = document.getElementById("importProgress");
 
-    /* ======================================================
-         GEOCODER (Nominatim, with US country lock)
-       ====================================================== */
-    async function geocode(addr) {
-      const url =
-        "https://nominatim.openstreetmap.org/search?format=json&countrycodes=us&limit=1&q=" +
-        encodeURIComponent(addr);
+    // ================= UTIL =================
+    const keyFor = (c) => `${(c.name||"").trim()}|${(c.address||"").trim()}`;
 
-      try {
-        const r = await fetch(url, { headers: { "Accept-Language": "en" } });
-        const data = await r.json();
-        if (data.length === 0) return null;
-
-        return {
-          lat: parseFloat(data[0].lat),
-          lng: parseFloat(data[0].lon),
-        };
-      } catch {
-        return null;
-      }
-    }
-
-    /* =============== DISTANCE CALCULATION =============== */
     function calcDist(a, b) {
-      const R = 3958.8; // miles
+      const R = 3958.8;
       const dLat = ((b.lat - a.lat) * Math.PI) / 180;
       const dLng = ((b.lng - a.lng) * Math.PI) / 180;
-
       const lat1 = (a.lat * Math.PI) / 180;
       const lat2 = (b.lat * Math.PI) / 180;
-
-      const x =
-        Math.sin(dLat / 2) ** 2 +
-        Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
-
+      const x = Math.sin(dLat/2)**2 + Math.cos(lat1)*Math.cos(lat2)*Math.sin(dLng/2)**2;
       return R * (2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x)));
     }
 
-    /* ======================================================
-                 RENDER CLIENT LIST
-       ====================================================== */
+    async function geocode(addr, attempt = 1) {
+      const url = "https://nominatim.openstreetmap.org/search?format=json&countrycodes=us&limit=1&q=" + encodeURIComponent(addr);
+      try {
+        const r = await fetch(url, { headers: { "Accept-Language": "en" } });
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        const data = await r.json();
+        if (!Array.isArray(data) || data.length === 0) return null;
+        return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+      } catch (e) {
+        // Retry lightly to handle 429/network blips
+        if (attempt < 3) {
+          await new Promise(res => setTimeout(res, 400 * attempt));
+          return geocode(addr, attempt + 1);
+        }
+        return null; // give up
+      }
+    }
+
     function renderClients() {
       clientListDiv.innerHTML = "";
+      counts.textContent = `${clients.length} client${clients.length === 1 ? "" : "s"}`;
 
-      let arr = [...clients];
+      const arr = therapistLatLng
+        ? [...clients].sort((a,b) => calcDist(therapistLatLng, a) - calcDist(therapistLatLng, b))
+        : [...clients];
 
-      // If therapist is set, sort by closest
-      if (therapistLatLng) {
-        arr.sort((a, b) => {
-          const da = calcDist(therapistLatLng, a);
-          const db = calcDist(therapistLatLng, b);
-          return da - db;
-        });
-      }
-
-      arr.forEach((c) => {
+      for (const c of arr) {
         const box = document.createElement("div");
         box.className = "client";
-
-        let miles = therapistLatLng ? calcDist(therapistLatLng, c).toFixed(1) : "—";
-
-        box.innerHTML = `<b>${c.name}</b><br>${c.address}<br><b>${miles} miles</b>`;
-
-        // Click → drop a pin
+        const miles = therapistLatLng ? calcDist(therapistLatLng, c).toFixed(1) : "—";
+        box.innerHTML = `<b>${escapeHtml(c.name)}</b><br>${escapeHtml(c.address)}<br><b>${miles} miles</b>`;
         box.onclick = () => {
           if (clientPin) map.removeLayer(clientPin);
           clientPin = L.marker([c.lat, c.lng]).addTo(map);
           map.setView([c.lat, c.lng], 12);
         };
-
         clientListDiv.appendChild(box);
-      });
+      }
     }
 
-    /* ======================================================
-                 SOCKET EVENTS
-       ====================================================== */
+    function escapeHtml(str) {
+      return String(str ?? "")
+        .replace(/&/g, "&amp;").replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+    }
 
+    function addLocalClient(worker) {
+      const k = keyFor(worker);
+      if (clientKeys.has(k)) return false;
+      clientKeys.add(k);
+      clients.push(worker);
+      return true;
+    }
+
+    // ================= SOCKET EVENTS =================
     socket.on("currentWorkers", (list) => {
-      clients = [...list];
+      clients = [];
+      clientKeys.clear();
+      for (const c of list || []) addLocalClient(c);
       renderClients();
     });
 
     socket.on("workerAdded", (c) => {
-      clients.push(c);
-      renderClients();
+      if (addLocalClient(c)) renderClients();
     });
 
     socket.on("workerRemoved", (c) => {
-      clients = clients.filter(
-        (x) => !(x.name === c.name && x.address === c.address)
-      );
-      renderClients();
+      const k = keyFor(c);
+      if (clientKeys.has(k)) {
+        clientKeys.delete(k);
+        clients = clients.filter(x => keyFor(x) !== k);
+        renderClients();
+      }
     });
 
     socket.on("allCleared", () => {
       clients = [];
+      clientKeys.clear();
       renderClients();
     });
 
-    /* ======================================================
-                 EXCEL / CSV UPLOAD
-       ====================================================== */
-    document.getElementById("excelInput").addEventListener("change", function () {
-      const file = this.files[0];
+    // ================= FILE UPLOAD =================
+    document.getElementById("excelInput").addEventListener("change", async function () {
+      const file = this.files?.[0];
       if (!file) return;
 
-      const reader = new FileReader();
-      reader.onload = async (e) => {
-        const lines = e.target.result.split("\n");
+      importStatus.textContent = "Parsing file…";
+      importProgress.style.display = "block";
+      importProgress.value = 0;
 
-        for (let line of lines) {
-          let [name, address] = line.split(",");
+      const share = document.getElementById("shareToggle").checked;
 
-          if (!name || !address) continue;
+      // Parse rows → [{name,address}]
+      let rows = [];
+      const ext = (file.name.split(".").pop() || "").toLowerCase();
 
-          const geo = await geocode(address);
-          if (!geo) continue;
+      if (ext === "xlsx") {
+        const data = await file.arrayBuffer();
+        const wb = XLSX.read(data, { type: "array" });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const json = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, blankrows: false });
+        rows = normalizeRows(json);
+      } else {
+        // csv/txt
+        rows = await parseCsvFile(file);
+      }
 
-          const worker = { name, address, lat: geo.lat, lng: geo.lng };
-          clients.push(worker);
-          renderClients();
+      // Geocode with small concurrency
+      importStatus.textContent = `Geocoding ${rows.length} row(s)…`;
+      const results = await geocodeInBatches(rows, 3, (done, total) => {
+        importProgress.value = Math.floor((done / total) * 100);
+      });
 
-          if (document.getElementById("shareToggle").checked) {
-  // When sharing: DO NOT add locally — wait for socket broadcast
-  socket.emit("addWorker", worker);
-} else {
-  // Local only
-  clients.push(worker);
-  renderClients();
-}
-
+      let added = 0, failed = 0;
+      for (const r of results) {
+        if (!r.geo) { failed++; continue; }
+        const worker = { name: r.name, address: r.address, lat: r.geo.lat, lng: r.geo.lng };
+        if (share) {
+          // Share only; rely on server broadcast. Avoid local add to prevent duplication.
+          socket.emit("addWorker", worker);
+          added++;
+        } else {
+          if (addLocalClient(worker)) added++;
         }
-      };
-      reader.readAsText(file);
+      }
+
+      if (!share) renderClients();
+
+      importStatus.textContent = `Done. Added ${added}. Failed ${failed}.`;
+      importProgress.style.display = "none";
+      this.value = ""; // reset
     });
 
-    /* ======================================================
-               THERAPIST SET + CLEAR
-       ====================================================== */
+    function normalizeRows(matrix) {
+      const out = [];
+      for (const row of matrix) {
+        if (!row || row.length === 0) continue;
+        // Heuristic: allow headers like "name,address"
+        const r0 = String(row[0] ?? "").trim().toLowerCase();
+        const r1 = String(row[1] ?? "").trim().toLowerCase();
+        if (out.length === 0 && (r0 === "name" || r1 === "address")) continue;
+
+        const name = String(row[0] ?? "").trim();
+        const address = String(row[1] ?? "").trim();
+        if (name && address) out.push({ name, address });
+      }
+      return out;
+    }
+
+    function parseCsvFile(file) {
+      return new Promise((resolve, reject) => {
+        Papa.parse(file, {
+          header: false,
+          skipEmptyLines: true,
+          complete: (res) => {
+            try { resolve(normalizeRows(res.data)); } catch (e) { reject(e); }
+          },
+          error: (err) => reject(err),
+        });
+      });
+    }
+
+    async function geocodeInBatches(rows, concurrency = 3, onProgress = () => {}) {
+      let idx = 0, done = 0;
+      const total = rows.length;
+      const results = Array(total);
+
+      const worker = async () => {
+        while (true) {
+          const i = idx++;
+          if (i >= total) return;
+          const r = rows[i];
+          const geo = await geocode(r.address);
+          results[i] = { ...r, geo };
+          onProgress(++done, total);
+        }
+      };
+
+      const runners = Array.from({ length: Math.min(concurrency, total) }, () => worker());
+      await Promise.all(runners);
+      return results;
+    }
+
+    // ================= THERAPIST =================
     document.getElementById("setTherapistBtn").onclick = async () => {
       const text = therapistInput.value.trim();
       if (!text) return;
-
+      therapistStatus.textContent = "Geocoding…";
       const geo = await geocode(text);
-      if (!geo) return;
-
+      if (!geo) { therapistStatus.textContent = "Not found."; return; }
       therapistLatLng = geo;
-
       if (therapistMarker) map.removeLayer(therapistMarker);
       therapistMarker = L.marker([geo.lat, geo.lng], {
         icon: L.icon({
-          iconUrl:
-            "https://cdn-icons-png.flaticon.com/512/684/684908.png",
+          iconUrl: "https://cdn-icons-png.flaticon.com/512/684/684908.png",
           iconSize: [40, 40],
         }),
       }).addTo(map);
-
       map.setView([geo.lat, geo.lng], 8);
-
+      therapistStatus.textContent = "";
       renderClients();
     };
 
     document.getElementById("clearTherapistBtn").onclick = () => {
       therapistLatLng = null;
       therapistInput.value = "";
+      therapistStatus.textContent = "";
       if (therapistMarker) map.removeLayer(therapistMarker);
       therapistMarker = null;
-
       renderClients();
       map.setView([39.5, -98.35], 4);
     };
 
-    /* ======================================================
-               CLEAR ALL CLIENTS (GLOBAL)
-       ====================================================== */
+    // ================= CLEAR ALL =================
     document.getElementById("clearAllBtn").onclick = () => {
-      socket.emit("clearAll");
+      if (confirm("Clear ALL clients for everyone?")) socket.emit("clearAll");
     };
   </script>
 </body>
 </html>
-
