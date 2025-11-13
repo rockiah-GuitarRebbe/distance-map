@@ -1,103 +1,90 @@
-// File: server.mjs
+// server.mjs  (or server.js with "type":"module" in package.json)
 import express from "express";
 import http from "http";
 import { Server } from "socket.io";
 import path from "path";
-import fs from "fs/promises";
+import fs from "fs";
 import { fileURLToPath } from "url";
 
 const app = express();
 const server = http.createServer(app);
+const io = new Server(server, {
+  cors: { origin: "*", methods: ["GET", "POST"] },
+  transports: ["websocket"],
+});
 
-// ---- Config (Render-friendly) ----
 const PORT = process.env.PORT || 3000;
-const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || "*"; // e.g. "https://your-service.onrender.com"
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Persistent disk: mount a Render Disk to /data and set DATA_DIR=/data
-const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "data");
-const DATA_FILE = path.join(DATA_DIR, "workers.json");
-
-// ---- Socket.IO ----
-const io = new Server(server, {
-  cors: { origin: ALLOWED_ORIGIN, methods: ["GET", "POST"] },
-  transports: ["websocket"] // Render supports WebSockets; avoids long-poll
-});
-
-// ---- Static (serves index.html) ----
+// Static
 app.use(express.static(__dirname));
 app.get("/", (_, res) => res.sendFile(path.join(__dirname, "index.html")));
 
-// ---- Health / Readonly helpers ----
-app.get("/healthz", async (_, res) => {
-  try {
-    await fs.stat(DATA_FILE);
-    res.status(200).json({ ok: true });
-  } catch {
-    res.status(200).json({ ok: true, note: "no data yet" });
-  }
-});
-app.get("/api/workers", async (_, res) => {
-  const workers = await loadWorkers();
-  res.json(workers);
-});
-
-// ---- Storage helpers ----
-async function ensureDataDir() {
-  await fs.mkdir(DATA_DIR, { recursive: true });
+// -------- Storage --------
+const DATA_FILE = path.join(__dirname, "workers.json");
+/** @type {{name:string,address:string,lat:number,lng:number,level?:string}[]} */
+let workers = [];
+if (fs.existsSync(DATA_FILE)) {
+  try { workers = JSON.parse(fs.readFileSync(DATA_FILE, "utf8")); } catch { workers = []; }
 }
-async function loadWorkers() {
-  try {
-    const raw = await fs.readFile(DATA_FILE, "utf8");
-    const arr = JSON.parse(raw);
-    return Array.isArray(arr) ? arr : [];
-  } catch {
-    return [];
-  }
-}
-async function saveWorkers(workers) {
-  await ensureDataDir();
-  await fs.writeFile(DATA_FILE, JSON.stringify(workers, null, 2));
+function saveWorkers() {
+  try { fs.writeFileSync(DATA_FILE, JSON.stringify(workers, null, 2)); } catch {}
 }
 
-// Load on boot
-let workers = await loadWorkers();
+// Normalize + validation
+const LEVELS = new Set(["critical","high","medium","low"]);
+function normLevel(level) {
+  const v = String(level || "").toLowerCase();
+  return LEVELS.has(v) ? v : "low";
+}
+function sanitizeWorker(w) {
+  const name = String(w?.name ?? "").trim();
+  const address = String(w?.address ?? "").trim();
+  const lat = Number(w?.lat);
+  const lng = Number(w?.lng);
+  const level = normLevel(w?.level);
+  if (!name || !address) return null;
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  return { name, address, lat, lng, level };
+}
+const keyFor = (w) =>
+  `${w.name.toLowerCase()}|${w.address.toLowerCase()}|${w.level}`;
 
-// ---- Socket handlers ----
+// -------- Sockets --------
 io.on("connection", (socket) => {
-  console.log("🟢 Client connected:", socket.id);
+  // Send normalized/leveled list (old records default to "low")
+  const normalized = workers.map((w) => ({ ...w, level: normLevel(w.level) }));
+  socket.emit("currentWorkers", normalized);
 
-  socket.emit("currentWorkers", workers);
-
-  socket.on("addWorker", async (w) => {
-    // naive dedup by name+address; matches your client behavior
-    const exists = workers.some(
-      (x) => x.name === w.name && x.address === w.address
-    );
-    if (exists) return; // no broadcast
-
+  socket.on("addWorker", (raw) => {
+    const w = sanitizeWorker(raw);
+    if (!w) return; // ignore bad payload
+    const exists = workers.some((x) => keyFor({ ...x, level: normLevel(x.level) }) === keyFor(w));
+    if (exists) return;
     workers.push(w);
-    await saveWorkers(workers);
+    saveWorkers();
     io.emit("workerAdded", w);
   });
 
-  socket.on("removeWorker", async (w) => {
+  socket.on("removeWorker", (raw) => {
+    const w = sanitizeWorker(raw);
+    if (!w) return;
+    const before = workers.length;
     workers = workers.filter(
-      (x) => !(x.name === w.name && x.address === w.address)
+      (x) => keyFor({ ...x, level: normLevel(x.level) }) !== keyFor(w)
     );
-    await saveWorkers(workers);
-    io.emit("workerRemoved", w);
+    if (workers.length !== before) {
+      saveWorkers();
+      io.emit("workerRemoved", w);
+    }
   });
 
-  socket.on("clearAll", async () => {
+  socket.on("clearAll", () => {
     workers = [];
-    await saveWorkers(workers);
+    saveWorkers();
     io.emit("allCleared");
   });
-
-  socket.on("disconnect", () => console.log("🔴 Client disconnected:", socket.id));
 });
 
-// ---- Boot ----
-server.listen(PORT, () => console.log(`🌎 Render listening on :${PORT}`));
+server.listen(PORT, () => console.log(`🌎 Running on :${PORT}`));
