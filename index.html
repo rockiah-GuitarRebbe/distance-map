@@ -1,267 +1,303 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="UTF-8" />
-  <title>Shared Distance Map</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
-  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <meta charset="utf-8" />
+  <title>Distance Viewer</title>
+
+  <!-- Leaflet -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+  />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <!-- Socket.IO -->
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
   <style>
     body {
       margin: 0;
-      display: grid;
-      grid-template-columns: 25% 1fr 25%;
-      height: 100vh;
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-    }
-    .panel {
       display: flex;
-      flex-direction: column;
-      background: #f8f8f8;
-      border-right: 1px solid #ddd;
+      height: 100vh;
+      font-family: Arial, sans-serif;
       overflow: hidden;
     }
-    .right { border-right: none; border-left: 1px solid #ddd; }
-    header {
-      background: #fff;
-      padding: 10px;
-      border-bottom: 1px solid #ddd;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
+
+    #sidebar {
+      width: 380px;
+      background: #f8f8f8;
+      border-right: 1px solid #ddd;
+      padding: 15px;
+      overflow-y: auto;
     }
-    h3 { margin: 0; font-size: 16px; }
-    #map { height: 100vh; width: 100%; }
-    button {
-      border: none;
-      border-radius: 5px;
-      padding: 6px 10px;
-      cursor: pointer;
-      background: #0b74d6;
-      color: #fff;
-      font-size: 14px;
+
+    #map {
+      flex: 1;
     }
-    button.danger { background: #e74c3c; }
-    button.gray { background: #888; }
-    .list { overflow-y: auto; padding: 10px; }
-    .row {
-      background: #fff;
-      margin-bottom: 6px;
-      border: 1px solid #ddd;
+
+    .client {
       padding: 8px;
+      margin-bottom: 6px;
+      border: 1px solid #ccc;
       border-radius: 6px;
+      background: #fff;
       cursor: pointer;
     }
-    .row:hover { background: #eef5ff; }
-    .name { font-weight: 600; }
-    .addr { font-size: 12px; color: #555; }
-    .distance-list { overflow-y: auto; padding: 10px; }
-    .distance-item {
-      display: flex;
-      justify-content: space-between;
-      border-bottom: 1px dashed #ddd;
-      padding: 8px 0;
-      cursor: pointer;
+
+    .client:hover {
+      background: #eee;
     }
-    .distance-item:hover { background: #fff; }
+
+    #therapistBox {
+      margin-bottom: 20px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid #ddd;
+    }
+
+    #distancesTitle {
+      margin-top: 20px;
+      font-size: 18px;
+      font-weight: bold;
+    }
   </style>
 </head>
+
 <body>
-  <!-- LEFT PANEL: Clients -->
-  <div class="panel">
-    <header>
-      <h3>Clients</h3>
-      <div>
-        <input type="file" id="excelInput" accept=".xlsx,.xls" style="display:none" />
-        <button id="uploadExcel">📂 Excel</button>
-        <button id="clearBtn" class="danger">🧹</button>
-      </div>
-    </header>
-    <div class="list" id="clientList"></div>
+  <!-- ================ SIDEBAR ================ -->
+  <div id="sidebar">
+
+    <!-- Therapist -->
+    <div id="therapistBox">
+      <b>Therapist Location</b><br />
+      <input
+        id="therapistInput"
+        type="text"
+        placeholder="Enter ZIP or address"
+        style="width: 100%; padding: 8px; margin-top: 4px;"
+      /><br />
+
+      <button id="setTherapistBtn" style="margin-top: 8px;">Set Therapist</button>
+      <button id="clearTherapistBtn">Clear</button>
+    </div>
+
+    <!-- Upload + Clear -->
+    <div>
+      <b>Client List</b><br />
+      <input type="file" id="excelInput" accept=".csv,.txt,.xlsx" /><br />
+
+      <input type="checkbox" id="shareToggle" checked />
+      <label for="shareToggle">Share my additions</label><br />
+      <small>(Applies to new uploads only)</small><br /><br />
+
+      <button id="clearAllBtn">Clear All Clients (Global)</button>
+    </div>
+
+    <!-- Distances -->
+    <div id="distancesTitle">Distances</div>
+    <div id="clientList"></div>
   </div>
 
-  <!-- MAP -->
+  <!-- ================ MAP ================ -->
   <div id="map"></div>
 
-  <!-- RIGHT PANEL: Therapist -->
-  <div class="panel right">
-    <header>
-      <h3>Therapist</h3>
-      <button id="clearTherapist" class="gray">Clear</button>
-    </header>
-    <div style="padding:10px;border-bottom:1px solid #ddd;">
-      <input id="therapistInput" placeholder="Enter address or ZIP" style="width:100%;padding:6px;" />
-      <button id="setTherapist" style="margin-top:6px;width:100%;">📍 Set Therapist</button>
-    </div>
-    <div style="padding:10px;font-weight:600;border-bottom:1px solid #ddd;">Distances (miles)</div>
-    <div class="distance-list" id="distanceList"></div>
-  </div>
-
   <script>
-    const socket = io(window.location.origin, { transports: ["polling"] });
-    const map = L.map("map").setView([39.8283, -98.5795], 5);
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
+    /* ===================================
+         SOCKET.IO (Render stable)
+       =================================== */
+    const socket = io("https://distance-map.onrender.com", {
+      transports: ["websocket"]
+    });
 
-    let clients = [];
-    let therapist = null;
+    /* ===================================
+            LEAFLET MAP
+       =================================== */
+    const map = L.map("map").setView([39.5, -98.35], 4); // USA
+
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+    }).addTo(map);
+
     let therapistMarker = null;
-    let highlightMarker = null;
+    let clientPin = null;
+    let therapistLatLng = null;
+    let clients = [];
 
-    const clientList = document.getElementById("clientList");
-    const distanceList = document.getElementById("distanceList");
+    const therapistInput = document.getElementById("therapistInput");
+    const clientListDiv = document.getElementById("clientList");
 
-    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-    const milesBetween = (a, b) => {
-      const toRad = (d) => d * Math.PI / 180;
-      const R = 3959;
-      const dLat = toRad(b.lat - a.lat);
-      const dLon = toRad(b.lon - a.lon);
-      const la1 = toRad(a.lat), la2 = toRad(b.lat);
-      const h = Math.sin(dLat/2)**2 + Math.cos(la1)*Math.cos(la2)*Math.sin(dLon/2)**2;
-      return R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1-h));
-    };
+    /* ======================================================
+         GEOCODER (Nominatim, with US country lock)
+       ====================================================== */
+    async function geocode(addr) {
+      const url =
+        "https://nominatim.openstreetmap.org/search?format=json&countrycodes=us&limit=1&q=" +
+        encodeURIComponent(addr);
 
-    function renderClients() {
-      clientList.innerHTML = "";
-      if (clients.length === 0) {
-        clientList.innerHTML = "<div style='color:#777'>No clients yet.</div>";
-        return;
+      try {
+        const r = await fetch(url, { headers: { "Accept-Language": "en" } });
+        const data = await r.json();
+        if (data.length === 0) return null;
+
+        return {
+          lat: parseFloat(data[0].lat),
+          lng: parseFloat(data[0].lon),
+        };
+      } catch {
+        return null;
       }
-      clients.forEach((c) => {
-        const div = document.createElement("div");
-        div.className = "row";
-        div.innerHTML = `<div class="name">${c.name}</div><div class="addr">${c.address}</div>`;
-        div.onclick = () => flashClient(c);
-        clientList.appendChild(div);
-      });
-      updateDistances();
     }
 
-    async function addClient(c) {
-      if (clients.some((x) => x.name === c.name && x.address === c.address)) return;
+    /* =============== DISTANCE CALCULATION =============== */
+    function calcDist(a, b) {
+      const R = 3958.8; // miles
+      const dLat = ((b.lat - a.lat) * Math.PI) / 180;
+      const dLng = ((b.lng - a.lng) * Math.PI) / 180;
+
+      const lat1 = (a.lat * Math.PI) / 180;
+      const lat2 = (b.lat * Math.PI) / 180;
+
+      const x =
+        Math.sin(dLat / 2) ** 2 +
+        Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+
+      return R * (2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x)));
+    }
+
+    /* ======================================================
+                 RENDER CLIENT LIST
+       ====================================================== */
+    function renderClients() {
+      clientListDiv.innerHTML = "";
+
+      let arr = [...clients];
+
+      // If therapist is set, sort by closest
+      if (therapistLatLng) {
+        arr.sort((a, b) => {
+          const da = calcDist(therapistLatLng, a);
+          const db = calcDist(therapistLatLng, b);
+          return da - db;
+        });
+      }
+
+      arr.forEach((c) => {
+        const box = document.createElement("div");
+        box.className = "client";
+
+        let miles = therapistLatLng ? calcDist(therapistLatLng, c).toFixed(1) : "—";
+
+        box.innerHTML = `<b>${c.name}</b><br>${c.address}<br><b>${miles} miles</b>`;
+
+        // Click → drop a pin
+        box.onclick = () => {
+          if (clientPin) map.removeLayer(clientPin);
+          clientPin = L.marker([c.lat, c.lng]).addTo(map);
+          map.setView([c.lat, c.lng], 12);
+        };
+
+        clientListDiv.appendChild(box);
+      });
+    }
+
+    /* ======================================================
+                 SOCKET EVENTS
+       ====================================================== */
+
+    socket.on("currentWorkers", (list) => {
+      clients = [...list];
+      renderClients();
+    });
+
+    socket.on("workerAdded", (c) => {
       clients.push(c);
       renderClients();
-      try {
-        await sleep(1000);
-        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&countrycodes=us&limit=1&q=${encodeURIComponent(c.address)}`);
-        const data = await res.json();
-        if (data.length) {
-          c.lat = parseFloat(data[0].lat);
-          c.lon = parseFloat(data[0].lon);
-          updateDistances();
-        }
-      } catch (e) { console.warn("Geocode failed"); }
-      socket.emit("addWorker", { name: c.name, address: c.address });
-    }
-
-    function flashClient(c) {
-      if (highlightMarker) map.removeLayer(highlightMarker);
-      if (c.lat && c.lon) {
-        highlightMarker = L.marker([c.lat, c.lon])
-          .addTo(map)
-          .bindPopup(`<b>${c.name}</b><br>${c.address}`)
-          .openPopup();
-        map.setView([c.lat, c.lon], 10);
-      }
-    }
-
-    function updateDistances() {
-      distanceList.innerHTML = "";
-      if (!therapist || !therapist.lat) return;
-      const here = { lat: therapist.lat, lon: therapist.lon };
-      const valid = clients.filter(c => c.lat && c.lon);
-      const arr = valid.map(c => ({ c, d: milesBetween(here, c) }));
-      arr.sort((a,b)=>a.d-b.d);
-      arr.forEach(({ c, d }) => {
-        const item = document.createElement("div");
-        item.className = "distance-item";
-        item.innerHTML = `<div>${c.name}</div><div>${d.toFixed(1)}</div>`;
-        item.onclick = () => flashClient(c);
-        distanceList.appendChild(item);
-      });
-    }
-
-    // Set Therapist
-    document.getElementById("setTherapist").onclick = async () => {
-      const q = document.getElementById("therapistInput").value.trim();
-      if (!q) return;
-      try {
-        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(q+", USA")}`);
-        const data = await res.json();
-        if (!data.length) return alert("Not found");
-        const { lat, lon, display_name } = data[0];
-        therapist = { lat: +lat, lon: +lon, display_name };
-        if (therapistMarker) map.removeLayer(therapistMarker);
-        therapistMarker = L.marker([lat, lon], {
-          icon: L.icon({ iconUrl: "https://maps.gstatic.com/mapfiles/ms2/micons/blue-dot.png", iconSize:[32,32], iconAnchor:[16,32] })
-        }).addTo(map).bindPopup(`<b>Therapist</b><br>${display_name}`).openPopup();
-        map.setView([lat, lon], 7);
-        updateDistances();
-      } catch {
-        alert("Failed to find address");
-      }
-    };
-
-    // ✅ Fixed Clear Therapist button
-    document.getElementById("clearTherapist").onclick = () => {
-      therapist = null;
-      if (therapistMarker) {
-        map.removeLayer(therapistMarker);
-        therapistMarker = null;
-      }
-      document.getElementById("therapistInput").value = ""; // now clears input properly
-      distanceList.innerHTML = "";
-    };
-
-    // Clear All Clients
-    document.getElementById("clearBtn").onclick = () => {
-      if (!confirm("Clear all clients?")) return;
-      clients = [];
-      clientList.innerHTML = "";
-      socket.emit("clearAll");
-      if (highlightMarker) map.removeLayer(highlightMarker);
-    };
-
-    // Excel Upload
-    document.getElementById("uploadExcel").onclick = () => document.getElementById("excelInput").click();
-    document.getElementById("excelInput").addEventListener("change", (e) => {
-      const file = e.target.files[0];
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = (ev) => {
-        const wb = XLSX.read(new Uint8Array(ev.target.result), { type: "array" });
-        const sheet = wb.Sheets[wb.SheetNames[0]];
-        const rows = XLSX.utils.sheet_to_json(sheet);
-        rows.forEach(r => {
-          const keys = Object.keys(r);
-          if (keys.length >= 2)
-            addClient({ name: r[keys[0]], address: r[keys[1]] });
-        });
-      };
-      reader.readAsArrayBuffer(file);
     });
 
-    // Socket updates
-    socket.on("initData", ({ workers }) => {
-      clients = workers.map(w => ({ ...w }));
+    socket.on("workerRemoved", (c) => {
+      clients = clients.filter(
+        (x) => !(x.name === c.name && x.address === c.address)
+      );
       renderClients();
     });
-    socket.on("workerAdded", (w) => {
-      if (!clients.some(c => c.name === w.name && c.address === w.address)) {
-        clients.push(w);
-        renderClients();
-      }
-    });
-    socket.on("workerRemoved", (w) => {
-      clients = clients.filter(c => !(c.name === w.name && c.address === w.address));
-      renderClients();
-    });
+
     socket.on("allCleared", () => {
       clients = [];
       renderClients();
     });
+
+    /* ======================================================
+                 EXCEL / CSV UPLOAD
+       ====================================================== */
+    document.getElementById("excelInput").addEventListener("change", function () {
+      const file = this.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        const lines = e.target.result.split("\n");
+
+        for (let line of lines) {
+          let [name, address] = line.split(",");
+
+          if (!name || !address) continue;
+
+          const geo = await geocode(address);
+          if (!geo) continue;
+
+          const worker = { name, address, lat: geo.lat, lng: geo.lng };
+          clients.push(worker);
+          renderClients();
+
+          if (document.getElementById("shareToggle").checked) {
+            socket.emit("addWorker", worker);
+          }
+        }
+      };
+      reader.readAsText(file);
+    });
+
+    /* ======================================================
+               THERAPIST SET + CLEAR
+       ====================================================== */
+    document.getElementById("setTherapistBtn").onclick = async () => {
+      const text = therapistInput.value.trim();
+      if (!text) return;
+
+      const geo = await geocode(text);
+      if (!geo) return;
+
+      therapistLatLng = geo;
+
+      if (therapistMarker) map.removeLayer(therapistMarker);
+      therapistMarker = L.marker([geo.lat, geo.lng], {
+        icon: L.icon({
+          iconUrl:
+            "https://cdn-icons-png.flaticon.com/512/684/684908.png",
+          iconSize: [40, 40],
+        }),
+      }).addTo(map);
+
+      map.setView([geo.lat, geo.lng], 8);
+
+      renderClients();
+    };
+
+    document.getElementById("clearTherapistBtn").onclick = () => {
+      therapistLatLng = null;
+      therapistInput.value = "";
+      if (therapistMarker) map.removeLayer(therapistMarker);
+      therapistMarker = null;
+
+      renderClients();
+      map.setView([39.5, -98.35], 4);
+    };
+
+    /* ======================================================
+               CLEAR ALL CLIENTS (GLOBAL)
+       ====================================================== */
+    document.getElementById("clearAllBtn").onclick = () => {
+      socket.emit("clearAll");
+    };
   </script>
 </body>
 </html>
