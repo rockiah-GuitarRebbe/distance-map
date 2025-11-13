@@ -1,167 +1,37 @@
-<!-- File: index.html (only the Socket.IO init changed to same-origin) -->
 <!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8" />
   <title>Distance Viewer</title>
 
+  <!-- Leaflet -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
+  <!-- Socket.IO -->
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+
   <style>
     body { margin:0; display:flex; height:100vh; font-family:Arial,sans-serif; overflow:hidden; }
-    #sidebar { width:380px; background:#f8f8f8; border-right:1px solid #ddd; padding:15px; overflow-y:auto; }
+    #sidebar { width:420px; background:#fafafa; border-right:1px solid #ddd; padding:14px; overflow-y:auto; }
     #map { flex:1; }
-    .client { padding:8px; margin-bottom:6px; border:1px solid #ccc; border-radius:6px; background:#fff; cursor:pointer; }
-    .client:hover { background:#eee; }
-    #therapistBox { margin-bottom:20px; padding-bottom:10px; border-bottom:1px solid #ddd; }
-    #distancesTitle { margin-top:20px; font-size:18px; font-weight:bold; }
+
+    .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    button { cursor:pointer; }
+    .meta { font-size:12px; color:#555; }
+    .pill { display:inline-block; padding:2px 8px; border:1px solid #ccc; border-radius:999px; font-size:12px; background:#fff; }
+
+    .client { padding:8px; margin-bottom:8px; border:1px solid #ddd; border-radius:8px; background:#fff; display:flex; justify-content:space-between; gap:8px; }
+    .client:hover { background:#f3f6ff; }
+    .badge { padding:2px 8px; border-radius:999px; font-size:11px; color:#fff; text-transform:capitalize; }
+    .badge.critical { background:#e53935; }
+    .badge.high     { background:#fb8c00; }
+    .badge.medium   { background:#fdd835; color:#222; }
+    .badge.low      { background:#43a047; }
+
+    .legend { display:flex; gap:10px; align-items:center; flex-wrap:wrap; font-size:12px; margin-top:8px; }
+    .dot { width:10px; height:10px; border-radius:50%; display:inline-block; }
+    .dot.critical{ background:#e53935; } .dot.high{ background:#fb8c00; }
+    .dot.medium{ background:#fdd835; border:1px solid #aaa; } .dot.low{ background:#43a047; }
   </style>
-</head>
-<body>
-  <div id="sidebar">
-    <div id="therapistBox">
-      <b>Therapist Location</b><br />
-      <input id="therapistInput" type="text" placeholder="Enter ZIP or address" style="width:100%; padding:8px; margin-top:4px;" /><br />
-      <button id="setTherapistBtn" style="margin-top:8px;">Set Therapist</button>
-      <button id="clearTherapistBtn">Clear</button>
-    </div>
-
-    <div>
-      <b>Client List</b><br />
-      <input type="file" id="excelInput" accept=".csv,.txt,.xlsx" /><br />
-      <input type="checkbox" id="shareToggle" checked />
-      <label for="shareToggle">Share my additions</label><br />
-      <small>(Applies to new uploads only)</small><br /><br />
-      <button id="clearAllBtn">Clear All Clients (Global)</button>
-    </div>
-
-    <div id="distancesTitle">Distances</div>
-    <div id="clientList"></div>
-  </div>
-
-  <div id="map"></div>
-
-  <script>
-    // Use same-origin socket on Render
-    const socket = io({ transports: ["websocket"] });
-
-    const map = L.map("map").setView([39.5, -98.35], 4);
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19 }).addTo(map);
-
-    let therapistMarker = null;
-    let clientPin = null;
-    let therapistLatLng = null;
-    let clients = [];
-
-    const therapistInput = document.getElementById("therapistInput");
-    const clientListDiv = document.getElementById("clientList");
-
-    async function geocode(addr) {
-      const url =
-        "https://nominatim.openstreetmap.org/search?format=json&countrycodes=us&limit=1&q=" +
-        encodeURIComponent(addr);
-      try {
-        const r = await fetch(url, { headers: { "Accept-Language": "en", "User-Agent": "distance-viewer/1.0 (contact@example.com)" } }); // UA per Nominatim policy
-        const data = await r.json();
-        if (!Array.isArray(data) || data.length === 0) return null;
-        return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
-      } catch { return null; }
-    }
-
-    function calcDist(a, b) {
-      const R = 3958.8;
-      const dLat = ((b.lat - a.lat) * Math.PI) / 180;
-      const dLng = ((b.lng - a.lng) * Math.PI) / 180;
-      const lat1 = (a.lat * Math.PI) / 180;
-      const lat2 = (b.lat * Math.PI) / 180;
-      const x = Math.sin(dLat/2)**2 + Math.cos(lat1)*Math.cos(lat2)*Math.sin(dLng/2)**2;
-      return R * (2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x)));
-    }
-
-    function renderClients() {
-      clientListDiv.innerHTML = "";
-      const arr = therapistLatLng
-        ? [...clients].sort((a,b) => calcDist(therapistLatLng, a) - calcDist(therapistLatLng, b))
-        : [...clients];
-
-      arr.forEach((c) => {
-        const box = document.createElement("div");
-        box.className = "client";
-        const miles = therapistLatLng ? calcDist(therapistLatLng, c).toFixed(1) : "—";
-        box.innerHTML = `<b>${c.name}</b><br>${c.address}<br><b>${miles} miles</b>`;
-        box.onclick = () => {
-          if (clientPin) map.removeLayer(clientPin);
-          clientPin = L.marker([c.lat, c.lng]).addTo(map);
-          map.setView([c.lat, c.lng], 12);
-        };
-        clientListDiv.appendChild(box);
-      });
-    }
-
-    // Sockets
-    socket.on("currentWorkers", (list) => { clients = [...list]; renderClients(); });
-    socket.on("workerAdded", (c) => { clients.push(c); renderClients(); });
-    socket.on("workerRemoved", (c) => {
-      clients = clients.filter((x) => !(x.name === c.name && x.address === c.address));
-      renderClients();
-    });
-    socket.on("allCleared", () => { clients = []; renderClients(); });
-
-    // Upload (simple CSV)
-    document.getElementById("excelInput").addEventListener("change", function () {
-      const file = this.files[0];
-      if (!file) return;
-
-      const reader = new FileReader();
-      reader.onload = async (e) => {
-        const lines = e.target.result.split("\n");
-        for (let line of lines) {
-          let [name, address] = line.split(",");
-          if (!name || !address) continue;
-          const geo = await geocode(address);
-          if (!geo) continue;
-
-          const worker = { name: name.trim(), address: address.trim(), lat: geo.lat, lng: geo.lng };
-
-          if (document.getElementById("shareToggle").checked) {
-            // Share: rely on server broadcast (avoid double-add)
-            socket.emit("addWorker", worker);
-          } else {
-            // Local only
-            clients.push(worker);
-            renderClients();
-          }
-        }
-      };
-      reader.readAsText(file);
-    });
-
-    // Therapist
-    document.getElementById("setTherapistBtn").onclick = async () => {
-      const text = therapistInput.value.trim();
-      if (!text) return;
-      const geo = await geocode(text);
-      if (!geo) return;
-      therapistLatLng = geo;
-      if (therapistMarker) map.removeLayer(therapistMarker);
-      therapistMarker = L.marker([geo.lat, geo.lng], {
-        icon: L.icon({ iconUrl: "https://cdn-icons-png.flaticon.com/512/684/684908.png", iconSize: [40, 40] })
-      }).addTo(map);
-      map.setView([geo.lat, geo.lng], 8);
-      renderClients();
-    };
-    document.getElementById("clearTherapistBtn").onclick = () => {
-      therapistLatLng = null;
-      therapistInput.value = "";
-      if (therapistMarker) map.removeLayer(therapistMarker);
-      therapistMarker = null;
-      renderClients();
-      map.setView([39.5, -98.35], 4);
-    };
-
-    document.getElementById("clearAllBtn").onclick = () => socket.emit("clearAll");
-  </script>
-</body>
-</html>
+</hea
