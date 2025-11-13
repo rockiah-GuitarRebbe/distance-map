@@ -112,10 +112,10 @@
   <div id="map"></div>
 
   <script>
-    // ===== sockets =====
+    // sockets (same-origin)
     const socket = io({ transports: ["websocket"] });
 
-    // ===== map =====
+    // map
     const map = L.map("map").setView([39.5, -98.35], 4);
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19 }).addTo(map);
 
@@ -154,7 +154,7 @@
 
     function escapeHtml(str) {
       return String(str ?? "")
-        .replace(/&/g,"&amp;").replace(/</g,"&lt;")
+        .replace(/&/g,"&amp;").replace(/<//g,"&lt;")
         .replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#039;");
     }
 
@@ -285,7 +285,7 @@
       renderList();
     }
 
-    // ===== socket events =====
+    // socket events
     socket.on("currentWorkers", (list) => {
       clients = []; clientKeys.clear();
       markersByKey.forEach(m => m.remove()); markersByKey.clear();
@@ -315,12 +315,15 @@
     });
 
     socket.on("allCleared", () => {
-      clients = []; clientKeys.clear();
-      markersByKey.forEach(m => m.remove()); markersByKey.clear();
+      clients = [];
+      clientKeys.clear();
+      markersByKey.forEach(m => m.remove());
+      markersByKey.clear();
       renderList();
+      map.setView([39.5, -98.35], 4);
     });
 
-    // ===== file upload =====
+    // file upload (any Excel/CSV; auto-detect name/address)
     fileInput.addEventListener("change", async function () {
       const file = this.files?.[0];
       if (!file) return;
@@ -331,18 +334,8 @@
       importProgress.value = 0;
 
       let rows = [];
-      const ext = (file.name.split(".").pop() || "").toLowerCase();
-
       try {
-        if (ext === "xlsx") {
-          const data = await file.arrayBuffer();
-          const wb = XLSX.read(data, { type: "array" });
-          const ws = wb.Sheets[wb.SheetNames[0]];
-          const json = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, blankrows: false });
-          rows = normalizeRows(json);
-        } else {
-          rows = await parseCsvFile(file);
-        }
+        rows = await readAnyTable(file); // -> [{name, address}]
       } catch {
         importStatus.textContent = "Could not read file.";
         importProgress.style.display = "none";
@@ -380,31 +373,138 @@
       this.value = "";
     });
 
-    function normalizeRows(matrix) {
+    // readAnyTable: detects name/address in CSV/XLSX with fuzzy headers and fallbacks
+    async function readAnyTable(file) {
+      const ext = (file.name.split(".").pop() || "").toLowerCase();
+      if (ext === "xlsx") {
+        const data = await file.arrayBuffer();
+        const wb = XLSX.read(data, { type: "array" });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const matrix = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, blankrows: false });
+        return extractNameAddressFromMatrix(matrix);
+      } else {
+        const matrix = await parseCsvToMatrix(file);
+        return extractNameAddressFromMatrix(matrix);
+      }
+    }
+
+    function parseCsvToMatrix(file) {
+      return new Promise((resolve, reject) => {
+        Papa.parse(file, {
+          header: false,
+          skipEmptyLines: true,
+          complete: (res) => resolve(res.data.map(row => row.map(cell => String(cell ?? "")))),
+          error: (err) => reject(err),
+        });
+      });
+    }
+
+    function extractNameAddressFromMatrix(matrix) {
+      const rows = matrix.filter(r => Array.isArray(r) && r.some(x => String(x).trim() !== ""));
+      if (rows.length === 0) return [];
+
+      // detect headers
+      const headerRow = rows[0].map(x => String(x || "").trim());
+      const looksLikeHeader = headerRow.some(h => /name|first|last|address|street|city|state|zip|postcode|location/i.test(h));
+      const dataRows = looksLikeHeader ? rows.slice(1) : rows;
+
+      const headers = looksLikeHeader
+        ? headerRow.map(h => h.toLowerCase())
+        : headerRow.map((_, i) => `col_${i}`);
+
+      const idx = detectColumns(headers);
+
+      // if no clear headers, fallback: first two non-empty cells as name/address
       const out = [];
-      for (const row of matrix) {
-        if (!row || row.length === 0) continue;
-        const a0 = String(row[0] ?? "").trim();
-        const a1 = String(row[1] ?? "").trim();
-        if (out.length === 0) {
-          const r0 = a0.toLowerCase(), r1 = a1.toLowerCase();
-          if (r0 === "name" || r1 === "address") continue;
+      for (const r of dataRows) {
+        let name = "";
+        let address = "";
+
+        if (idx.nameStrategy === "full") {
+          name = String(r[idx.name] ?? "").trim();
+        } else if (idx.nameStrategy === "first_last") {
+          const first = String(r[idx.first] ?? "").trim();
+          const last  = String(r[idx.last] ?? "").trim();
+          name = [first, last].filter(Boolean).join(" ").trim();
+        } else {
+          // fallback: first non-empty cell
+          name = String(r[0] ?? "").trim();
         }
-        if (a0 && a1) out.push({ name: a0, address: a1 });
+
+        if (idx.addrStrategy === "full") {
+          address = String(r[idx.address] ?? "").trim();
+        } else if (idx.addrStrategy === "parts") {
+          const parts = [];
+          if (idx.street != null) parts.push(String(r[idx.street] ?? "").trim());
+          if (idx.city   != null) parts.push(String(r[idx.city] ?? "").trim());
+          if (idx.state  != null) parts.push(String(r[idx.state] ?? "").trim());
+          if (idx.zip    != null) parts.push(String(r[idx.zip] ?? "").trim());
+          address = parts.filter(Boolean).join(", ").replace(/\s+,/g, ",").trim();
+        } else {
+          // fallback: second non-empty cell
+          const cells = r.map(x => String(x ?? "").trim()).filter(Boolean);
+          address = cells[1] || "";
+        }
+
+        if (name && address) out.push({ name, address });
       }
       return out;
     }
 
-    function parseCsvFile(file) {
-      return new Promise((resolve, reject) => {
-        Papa.parse(file, {
-          header: false, skipEmptyLines: true,
-          complete: (res) => {
-            try { resolve(normalizeRows(res.data)); } catch (e) { reject(e); }
-          },
-          error: (err) => reject(err),
-        });
-      });
+    function detectColumns(headers) {
+      // normalize
+      const H = headers.map(h => h.toLowerCase().trim());
+
+      // name
+      const nameIdx = findHeader(H, [/^name$/, /client/, /patient/, /full\s*name/]);
+      const firstIdx = findHeader(H, [/^first$/, /^first[_\s]?name$/]);
+      const lastIdx  = findHeader(H, [/^last$/, /^last[_\s]?name$/, /^surname$/]);
+
+      // address
+      const addrIdx = findHeader(H, [/^address$/, /^address[_\s]?1$/, /full\s*address/, /^location$/]);
+      const streetIdx = findHeader(H, [/^street$/, /^street[_\s]?1$/, /^address[_\s]?line[_\s]?1$/, /^addr1$/, /^road$/, /^line1$/]);
+      const cityIdx   = findHeader(H, [/^city$/, /^town$/, /^locality$/]);
+      const stateIdx  = findHeader(H, [/^state$/, /^province$/, /^region$/, /^state[_\s]?code$/]);
+      const zipIdx    = findHeader(H, [/^zip$/, /^zipcode$/, /^postal$/, /^postcode$/, /^zip[_\s]?code$/]);
+
+      const result = {
+        nameStrategy: "fallback",
+        addrStrategy: "fallback",
+        name: null, first: null, last: null,
+        address: null, street: null, city: null, state: null, zip: null
+      };
+
+      if (nameIdx != null) {
+        result.nameStrategy = "full";
+        result.name = nameIdx;
+      } else if (firstIdx != null || lastIdx != null) {
+        result.nameStrategy = "first_last";
+        result.first = firstIdx ?? null;
+        result.last  = lastIdx ?? null;
+      }
+
+      if (addrIdx != null) {
+        result.addrStrategy = "full";
+        result.address = addrIdx;
+      } else if (streetIdx != null || cityIdx != null || stateIdx != null || zipIdx != null) {
+        result.addrStrategy = "parts";
+        result.street = streetIdx ?? null;
+        result.city   = cityIdx ?? null;
+        result.state  = stateIdx ?? null;
+        result.zip    = zipIdx ?? null;
+      }
+
+      return result;
+    }
+
+    function findHeader(H, patterns) {
+      for (let i = 0; i < H.length; i++) {
+        const h = H[i];
+        for (const p of patterns) {
+          if (p.test(h)) return i;
+        }
+      }
+      return null;
     }
 
     async function geocodeInBatches(rows, concurrency = 3, onProgress = () => {}) {
@@ -424,10 +524,8 @@
       return results;
     }
 
-    // ===== filters / export =====
-    document.querySelectorAll(".lvl-toggle").forEach(cb => {
-      cb.addEventListener("change", () => renderList());
-    });
+    // filters / export
+    document.querySelectorAll(".lvl-toggle").forEach(cb => cb.addEventListener("change", () => renderList()));
     searchInput.addEventListener("input", () => renderList());
     radiusInput.addEventListener("input", () => renderList());
 
@@ -445,7 +543,7 @@
       return /[",\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s;
     }
 
-    // ===== therapist =====
+    // therapist
     document.getElementById("setTherapistBtn").onclick = async () => {
       const text = therapistInput.value.trim();
       if (!text) return;
@@ -468,11 +566,15 @@
       renderList(); map.setView([39.5, -98.35], 4);
     };
 
-    // ===== misc =====
-    document.getElementById("fitBtn").onclick = () => fitToAllMarkers();
+    // clear all (global)
     document.getElementById("clearAllBtn").onclick = () => {
-      if (confirm("Clear ALL clients for everyone?")) socket.emit("clearAll");
+      if (confirm("Clear ALL clients for everyone?")) {
+        socket.emit("clearAll");
+      }
     };
+
+    // fit to pins
+    document.getElementById("fitBtn").onclick = () => fitToAllMarkers();
   </script>
 </body>
 </html>
