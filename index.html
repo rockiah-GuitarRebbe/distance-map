@@ -1,3 +1,4 @@
+<!-- index.html -->
 <!DOCTYPE html>
 <html>
 <head>
@@ -96,6 +97,14 @@
       <button id="exportBtn" title="Export visible to CSV">Export CSV</button>
     </div>
 
+    <!-- Failures UI -->
+    <div class="row" style="margin:6px 0;">
+      <div id="failBox" class="meta" style="display:none;">
+        <b>Failed rows:</b> <span id="failCount">0</span>
+        <button id="downloadFailsBtn" type="button">Download failures.csv</button>
+      </div>
+    </div>
+
     <!-- Clients -->
     <div class="row" style="justify-content:space-between;">
       <div><b>Clients</b></div>
@@ -138,6 +147,7 @@
     let clients = [];
     const clientKeys = new Set();      // name|address|level
     const markersByKey = new Map();    // key -> marker
+    let lastFailures = [];
 
     const therapistInput = document.getElementById("therapistInput");
     const therapistNote  = document.getElementById("therapistNote");
@@ -171,16 +181,24 @@
       return R * (2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x)));
     }
 
-    async function geocode(addr, attempt=1) {
-      const url = "https://nominatim.openstreetmap.org/search?format=json&countrycodes=us&limit=1&q=" + encodeURIComponent(addr);
+    async function geocode(addr, attempt = 1, globalFallback = false) {
+      const base = "https://nominatim.openstreetmap.org/search?format=json&limit=1";
+      const countryPart = globalFallback ? "" : "&countrycodes=us";
+      const url = `${base}${countryPart}&q=${encodeURIComponent(addr)}`;
       try {
-        const r = await fetch(url, { headers: { "Accept-Language": "en" } });
+        const r = await fetch(url, { headers: { "Accept-Language": "en", "Referer": location.origin } });
         if (!r.ok) throw new Error("HTTP " + r.status);
         const data = await r.json();
-        if (!Array.isArray(data) || data.length === 0) return null;
+        if (!Array.isArray(data) || data.length === 0) {
+          if (!globalFallback) return geocode(addr, attempt, true);
+          return null;
+        }
         return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
       } catch {
-        if (attempt < 3) { await new Promise(res => setTimeout(res, 400*attempt)); return geocode(addr, attempt+1); }
+        if (attempt < 3) {
+          await new Promise(res => setTimeout(res, 400 * attempt));
+          return geocode(addr, attempt + 1, globalFallback);
+        }
         return null;
       }
     }
@@ -335,6 +353,7 @@
       importStatus.textContent = "Parsing file…";
       importProgress.style.display = "block";
       importProgress.value = 0;
+      lastFailures = [];
 
       let rows = [];
       try {
@@ -345,8 +364,13 @@
         return;
       }
 
+      // cleanup & drop blanks
+      rows = rows
+        .map(r => ({ name: String(r.name||"").trim(), address: String(r.address||"").trim() }))
+        .filter(r => r.name && r.address);
+
       importStatus.textContent = `Geocoding ${rows.length} row(s)…`;
-      const results = await geocodeInBatches(rows, 3, (done, total) => {
+      const results = await geocodeInBatches(rows, 2, (done, total) => {
         importProgress.value = Math.floor((done / total) * 100);
       });
 
@@ -355,25 +379,50 @@
       let added = 0, failed = 0;
 
       for (const r of results) {
-        if (!r.geo) { failed++; continue; }
+        if (!r.geo) {
+          failed++;
+          lastFailures.push({ name: r.name, address: r.address, reason: "geocode_failed" });
+          continue;
+        }
         const worker = { name: r.name, address: r.address, lat: r.geo.lat, lng: r.geo.lng, level };
         if (addLocal(worker)) {
           added++;
           if (share) toShare.push(worker);
+        } else {
+          lastFailures.push({ name: r.name, address: r.address, reason: "duplicate" });
         }
       }
 
-      if (toShare.length >= 10) {
-        socket.emit("addWorkersBatch", toShare);
-      } else if (toShare.length) {
-        for (const w of toShare) socket.emit("addWorker", w);
-      }
+      if (toShare.length >= 10) socket.emit("addWorkersBatch", toShare);
+      else for (const w of toShare) socket.emit("addWorker", w);
 
       renderList();
       fitToAllMarkers();
       importStatus.textContent = `Done. Added ${added}. Failed ${failed}.`;
       importProgress.style.display = "none";
       this.value = "";
+
+      // failures UI
+      const failBox = document.getElementById("failBox");
+      const failCount = document.getElementById("failCount");
+      const downloadFailsBtn = document.getElementById("downloadFailsBtn");
+      if (lastFailures.length) {
+        failBox.style.display = "";
+        failCount.textContent = String(lastFailures.length);
+      } else {
+        failBox.style.display = "none";
+      }
+      downloadFailsBtn.onclick = () => {
+        const header = ["name","address","reason"];
+        const lines = [header.join(",")].concat(
+          lastFailures.map(f => [f.name, f.address, f.reason].map(csvCell).join(","))
+        );
+        const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url; a.download = "failures.csv"; a.click();
+        URL.revokeObjectURL(url);
+      };
     });
 
     // readAnyTable: detects name/address in CSV/XLSX with fuzzy headers and fallbacks
@@ -406,7 +455,6 @@
       const rows = matrix.filter(r => Array.isArray(r) && r.some(x => String(x).trim() !== ""));
       if (rows.length === 0) return [];
 
-      // detect headers
       const headerRow = rows[0].map(x => String(x || "").trim());
       const looksLikeHeader = headerRow.some(h => /name|first|last|address|street|city|state|zip|postcode|location/i.test(h));
       const dataRows = looksLikeHeader ? rows.slice(1) : rows;
@@ -456,12 +504,12 @@
       const H = headers.map(h => h.toLowerCase().trim());
 
       // name candidates
-      const nameIdx = findHeader(H, [/^name$/, /client/, /patient/, /full\s*name/]);
+      const nameIdx  = findHeader(H, [/^name$/, /client/, /patient/, /full\s*name/, /contact/, /attn/, /person/]);
       const firstIdx = findHeader(H, [/^first$/, /^first[_\s]?name$/]);
       const lastIdx  = findHeader(H, [/^last$/, /^last[_\s]?name$/, /^surname$/]);
 
       // address candidates
-      const addrIdx = findHeader(H, [/^address$/, /^address[_\s]?1$/, /full\s*address/, /^location$/]);
+      const addrIdx   = findHeader(H, [/^address$/, /^address[_\s]?1$/, /full\s*address/, /^location$/]);
       const streetIdx = findHeader(H, [/^street$/, /^street[_\s]?1$/, /^address[_\s]?line[_\s]?1$/, /^addr1$/, /^road$/, /^line1$/]);
       const cityIdx   = findHeader(H, [/^city$/, /^town$/, /^locality$/]);
       const stateIdx  = findHeader(H, [/^state$/, /^province$/, /^region$/, /^state[_\s]?code$/]);
@@ -474,24 +522,15 @@
         address: null, street: null, city: null, state: null, zip: null
       };
 
-      if (nameIdx != null) {
-        result.nameStrategy = "full";
-        result.name = nameIdx;
-      } else if (firstIdx != null || lastIdx != null) {
-        result.nameStrategy = "first_last";
-        result.first = firstIdx ?? null;
-        result.last  = lastIdx ?? null;
+      if (nameIdx != null) { result.nameStrategy = "full"; result.name = nameIdx; }
+      else if (firstIdx != null || lastIdx != null) {
+        result.nameStrategy = "first_last"; result.first = firstIdx ?? null; result.last = lastIdx ?? null;
       }
 
-      if (addrIdx != null) {
-        result.addrStrategy = "full";
-        result.address = addrIdx;
-      } else if (streetIdx != null || cityIdx != null || stateIdx != null || zipIdx != null) {
+      if (addrIdx != null) { result.addrStrategy = "full"; result.address = addrIdx; }
+      else if (streetIdx != null || cityIdx != null || stateIdx != null || zipIdx != null) {
         result.addrStrategy = "parts";
-        result.street = streetIdx ?? null;
-        result.city   = cityIdx ?? null;
-        result.state  = stateIdx ?? null;
-        result.zip    = zipIdx ?? null;
+        result.street = streetIdx ?? null; result.city = cityIdx ?? null; result.state = stateIdx ?? null; result.zip = zipIdx ?? null;
       }
 
       return result;
@@ -500,14 +539,12 @@
     function findHeader(H, patterns) {
       for (let i = 0; i < H.length; i++) {
         const h = H[i];
-        for (const p of patterns) {
-          if (p.test(h)) return i;
-        }
+        for (const p of patterns) if (p.test(h)) return i;
       }
       return null;
     }
 
-    async function geocodeInBatches(rows, concurrency = 3, onProgress = () => {}) {
+    async function geocodeInBatches(rows, concurrency = 2, onProgress = () => {}) {
       let idx = 0, done = 0;
       const total = rows.length;
       const results = Array(total);
@@ -531,14 +568,14 @@
 
     document.getElementById("exportBtn").onclick = () => {
       const rows = visibleClients().map(c => [c.name, c.address, c.level, c.lat, c.lng]);
-      const csv = "name,address,level,lat,lng\n" + rows.map(r => r.map(safeCsv).join(",")).join("\n");
+      const csv = "name,address,level,lat,lng\n" + rows.map(r => r.map(csvCell).join(",")).join("\n");
       const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url; a.download = "clients.csv"; a.click();
       URL.revokeObjectURL(url);
     };
-    function safeCsv(v) {
+    function csvCell(v) {
       const s = String(v ?? "");
       return /[",\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s;
     }
@@ -568,9 +605,7 @@
 
     // clear all (global)
     document.getElementById("clearAllBtn").onclick = () => {
-      if (confirm("Clear ALL clients for everyone?")) {
-        socket.emit("clearAll");
-      }
+      if (confirm("Clear ALL clients for everyone?")) socket.emit("clearAll");
     };
 
     // fit to pins
