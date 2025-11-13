@@ -154,8 +154,11 @@
 
     function escapeHtml(str) {
       return String(str ?? "")
-        .replace(/&/g,"&amp;").replace(/<//g,"&lt;")
-        .replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#039;");
+        .replace(/&/g,"&amp;")
+        .replace(/</g,"&lt;")
+        .replace(/>/g,"&gt;")
+        .replace(/"/g,"&quot;")
+        .replace(/'/g,"&#039;");
     }
 
     function calcDist(a, b) {
@@ -414,7 +417,6 @@
 
       const idx = detectColumns(headers);
 
-      // if no clear headers, fallback: first two non-empty cells as name/address
       const out = [];
       for (const r of dataRows) {
         let name = "";
@@ -427,8 +429,8 @@
           const last  = String(r[idx.last] ?? "").trim();
           name = [first, last].filter(Boolean).join(" ").trim();
         } else {
-          // fallback: first non-empty cell
-          name = String(r[0] ?? "").trim();
+          const cells = r.map(x => String(x ?? "").trim()).filter(Boolean);
+          name = cells[0] || "";
         }
 
         if (idx.addrStrategy === "full") {
@@ -441,7 +443,6 @@
           if (idx.zip    != null) parts.push(String(r[idx.zip] ?? "").trim());
           address = parts.filter(Boolean).join(", ").replace(/\s+,/g, ",").trim();
         } else {
-          // fallback: second non-empty cell
           const cells = r.map(x => String(x ?? "").trim()).filter(Boolean);
           address = cells[1] || "";
         }
@@ -452,15 +453,14 @@
     }
 
     function detectColumns(headers) {
-      // normalize
       const H = headers.map(h => h.toLowerCase().trim());
 
-      // name
+      // name candidates
       const nameIdx = findHeader(H, [/^name$/, /client/, /patient/, /full\s*name/]);
       const firstIdx = findHeader(H, [/^first$/, /^first[_\s]?name$/]);
       const lastIdx  = findHeader(H, [/^last$/, /^last[_\s]?name$/, /^surname$/]);
 
-      // address
+      // address candidates
       const addrIdx = findHeader(H, [/^address$/, /^address[_\s]?1$/, /full\s*address/, /^location$/]);
       const streetIdx = findHeader(H, [/^street$/, /^street[_\s]?1$/, /^address[_\s]?line[_\s]?1$/, /^addr1$/, /^road$/, /^line1$/]);
       const cityIdx   = findHeader(H, [/^city$/, /^town$/, /^locality$/]);
