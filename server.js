@@ -1,3 +1,4 @@
+// server.js
 import express from "express";
 import http from "http";
 import { Server } from "socket.io";
@@ -9,18 +10,18 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: { origin: "*", methods: ["GET", "POST"] },
-  transports: ["websocket"],
+  transports: ["websocket"]
 });
 
 const PORT = process.env.PORT || 3000;
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// ---- static
+// static
 app.use(express.static(__dirname));
 app.get("/", (_, res) => res.sendFile(path.join(__dirname, "index.html")));
 
-// ---- storage
+// storage
 const DATA_FILE = path.join(__dirname, "workers.json");
 /** @type {{name:string,address:string,lat:number,lng:number,level?:string}[]} */
 let workers = [];
@@ -31,9 +32,10 @@ function saveWorkers() {
   try { fs.writeFileSync(DATA_FILE, JSON.stringify(workers, null, 2)); } catch {}
 }
 
-// ---- helpers
+// helpers
 const LEVELS = new Set(["critical","high","medium","low"]);
 const normLevel = (v) => (LEVELS.has(String(v||"").toLowerCase()) ? String(v).toLowerCase() : "low");
+const keyFor = (w) => `${w.name.toLowerCase()}|${w.address.toLowerCase()}|${normLevel(w.level)}`;
 
 function sanitizeWorker(w) {
   const name = String(w?.name ?? "").trim();
@@ -42,30 +44,31 @@ function sanitizeWorker(w) {
   const level = normLevel(w?.level);
   if (!name || !address) return null;
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-  // US-ish bounds (optional guard)
+  // optional US-ish bounds guard:
   if (lat < 18 || lat > 73 || lng < -180 || lng > -50) return null;
   return { name, address, lat, lng, level };
 }
-const keyFor = (w) => `${w.name.toLowerCase()}|${w.address.toLowerCase()}|${normLevel(w.level)}`;
 
-// ---- endpoints
+// endpoints (debug)
 app.get("/healthz", (_, res) => res.status(200).json({ ok: true, count: workers.length }));
 app.get("/api/workers", (_, res) => res.json(workers.map(w => ({ ...w, level: normLevel(w.level) }))));
 
-// ---- sockets
+// sockets
 io.on("connection", (socket) => {
+  // send current
   socket.emit("currentWorkers", workers.map(w => ({ ...w, level: normLevel(w.level) })));
 
+  // add one
   socket.on("addWorker", (raw) => {
     const w = sanitizeWorker(raw);
     if (!w) return;
-    const exists = workers.some(x => keyFor(x) === keyFor(w));
-    if (exists) return;
+    if (workers.some(x => keyFor(x) === keyFor(w))) return;
     workers.push(w);
     saveWorkers();
     io.emit("workerAdded", w);
   });
 
+  // add batch
   socket.on("addWorkersBatch", (arr) => {
     if (!Array.isArray(arr)) return;
     const accepted = [];
@@ -82,6 +85,7 @@ io.on("connection", (socket) => {
     }
   });
 
+  // remove one
   socket.on("removeWorker", (raw) => {
     const w = sanitizeWorker(raw);
     if (!w) return;
@@ -93,6 +97,7 @@ io.on("connection", (socket) => {
     }
   });
 
+  // clear all
   socket.on("clearAll", () => {
     workers = [];
     saveWorkers();
