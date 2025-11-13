@@ -7,49 +7,73 @@ import { fileURLToPath } from "url";
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server);
-const PORT = process.env.PORT || 3000;
 
+// ⭐ Render-safe + WebSocket-forced Socket.IO
+const io = new Server(server, {
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST"]
+  },
+  transports: ["websocket"]
+});
+
+const PORT = process.env.PORT || 3000;
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// serve index.html + static files
+// Serve static files (index.html, etc.)
 app.use(express.static(__dirname));
 
 app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "index.html"));
 });
 
-// persistent shared data
+// =========================
+//  SHARED CLIENT STORAGE
+// =========================
+
 const DATA_FILE = path.join(__dirname, "workers.json");
 let workers = [];
+
+// Load initial storage
 if (fs.existsSync(DATA_FILE)) {
-  try { workers = JSON.parse(fs.readFileSync(DATA_FILE)); }
-  catch { workers = []; }
+  try {
+    workers = JSON.parse(fs.readFileSync(DATA_FILE));
+  } catch {
+    workers = [];
+  }
 }
+
 function saveWorkers() {
   fs.writeFileSync(DATA_FILE, JSON.stringify(workers, null, 2));
 }
 
-// socket logic
-io.on("connection", socket => {
+// =========================
+//     SOCKET.IO LOGIC
+// =========================
+io.on("connection", (socket) => {
   console.log("🟢 Client connected");
-  socket.emit("initData", { workers });
 
-  socket.on("addWorker", worker => {
-    workers.push(worker);
+  // Give new browser the full list
+  socket.emit("currentWorkers", workers);
+
+  // Someone adds a client
+  socket.on("addWorker", (w) => {
+    workers.push(w);
     saveWorkers();
-    io.emit("workerAdded", worker);
+    io.emit("workerAdded", w);
   });
 
-  socket.on("removeWorker", worker => {
+  // Someone deletes a client (worldwide)
+  socket.on("removeWorker", (w) => {
     workers = workers.filter(
-      w => !(w.name === worker.name && w.address === worker.address)
+      (x) => !(x.name === w.name && x.address === w.address)
     );
     saveWorkers();
-    io.emit("workerRemoved", worker);
+    io.emit("workerRemoved", w);
   });
 
+  // Someone clears everything (worldwide)
   socket.on("clearAll", () => {
     workers = [];
     saveWorkers();
@@ -59,4 +83,4 @@ io.on("connection", socket => {
   socket.on("disconnect", () => console.log("🔴 Client disconnected"));
 });
 
-server.listen(PORT, () => console.log(`🌎 Live on port ${PORT}`));
+server.listen(PORT, () => console.log(`🌎 Running on port ${PORT}`));
