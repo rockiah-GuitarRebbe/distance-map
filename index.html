@@ -249,8 +249,14 @@
           renderClients();
 
           if (document.getElementById("shareToggle").checked) {
-            socket.emit("addWorker", worker);
-          }
+  // When sharing: DO NOT add locally — wait for socket broadcast
+  socket.emit("addWorker", worker);
+} else {
+  // Local only
+  clients.push(worker);
+  renderClients();
+}
+
         }
       };
       reader.readAsText(file);
@@ -301,3 +307,4 @@
   </script>
 </body>
 </html>
+
