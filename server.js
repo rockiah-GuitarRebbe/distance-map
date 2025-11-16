@@ -1,144 +1,93 @@
-// server.js
+// path: server.js
 import express from "express";
-import http from "http";
-import { Server } from "socket.io";
-import path from "path";
-import fs from "fs";
-import { fileURLToPath } from "url";
+import { createServer } from "http";
+import { Server as SocketIOServer } from "socket.io";
+
+// Why: allow PORT override in hosting; default 3000 for local dev.
+const PORT = process.env.PORT ? Number(process.env.PORT) : 3000;
+const HOST = process.env.HOST || "0.0.0.0";
 
 const app = express();
-const server = http.createServer(app);
-const io = new Server(server, {
-  cors: { origin: "*", methods: ["GET", "POST"] },
-  transports: ["websocket"]
+app.disable("x-powered-by"); // why: minor security hardening
+app.use(express.json({ limit: "1mb" }));
+app.use(express.urlencoded({ extended: true, limit: "1mb" }));
+
+// Serve static client files from ./public (e.g., index.html, client js)
+app.use(express.static("public", { fallthrough: true }));
+
+// Simple health check for uptime monitors
+app.get("/health", (_req, res) => res.status(200).json({ ok: true }));
+
+// Central error handler (last middleware)
+app.use((err, _req, res, _next) => {
+  console.error("Unhandled error:", err);
+  res.status(500).json({ error: "Internal Server Error" });
 });
 
-const PORT = process.env.PORT || 3000;
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const httpServer = createServer(app);
 
-// ---- static
-app.use(express.static(__dirname));
-app.get("/", (_, res) => res.sendFile(path.join(__dirname, "index.html")));
+// Socket.IO on same server
+const io = new SocketIOServer(httpServer, {
+  // why: defaults safe for same-origin; tweak if serving from another host
+  cors: false,
+});
 
-// ---- storage
-const DATA_FILE = path.join(__dirname, "workers.json");
-/** @type {{name:string,address:string,lat:number,lng:number,level?:string}[]} */
-let workers = [];
-if (fs.existsSync(DATA_FILE)) {
-  try {
-    workers = JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
-  } catch {
-    workers = [];
-  }
-}
-function saveWorkers() {
-  try {
-    fs.writeFileSync(DATA_FILE, JSON.stringify(workers, null, 2));
-  } catch {}
-}
-
-// ---- helpers
-const LEVELS = new Set(["critical", "high", "medium", "low"]);
-const normLevel = (v) =>
-  LEVELS.has(String(v || "").toLowerCase()) ? String(v).toLowerCase() : "low";
-const keyFor = (w) =>
-  `${w.name.toLowerCase()}|${w.address.toLowerCase()}|${normLevel(w.level)}`;
-
-function sanitizeWorker(w) {
-  const name = String(w?.name ?? "").trim();
-  const address = String(w?.address ?? "").trim();
-  const lat = Number(w?.lat),
-    lng = Number(w?.lng);
-  const level = normLevel(w?.level);
-  if (!name || !address) return null;
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-  // US-ish bounds guard (optional)
-  if (lat < 18 || lat > 73 || lng < -180 || lng > -50) return null;
-  return { name, address, lat, lng, level };
-}
-
-// ---- debug endpoints
-app.get("/healthz", (_, res) =>
-  res.status(200).json({ ok: true, count: workers.length })
-);
-app.get("/api/workers", (_, res) =>
-  res.json(workers.map((w) => ({ ...w, level: normLevel(w.level) })))
-);
-
-// ---- sockets
+// Socket handlers
 io.on("connection", (socket) => {
-  // send full list on connect
-  socket.emit(
-    "currentWorkers",
-    workers.map((w) => ({ ...w, level: normLevel(w.level) }))
-  );
+  console.log(`[io] connected ${socket.id}`);
 
-  // add one
-  socket.on("addWorker", (raw) => {
-    const w = sanitizeWorker(raw);
-    if (!w) return;
-    if (workers.some((x) => keyFor(x) === keyFor(w))) return;
-    workers.push(w);
-    saveWorkers();
-    io.emit("workerAdded", w);
-  });
-
-  // add batch
-  socket.on("addWorkersBatch", (arr) => {
-    if (!Array.isArray(arr)) return;
-    const accepted = [];
-    for (const raw of arr) {
-      const w = sanitizeWorker(raw);
-      if (!w) continue;
-      if (workers.some((x) => keyFor(x) === keyFor(w))) continue;
-      workers.push(w);
-      accepted.push(w);
-    }
-    if (accepted.length) {
-      saveWorkers();
-      io.emit("workersAddedBatch", accepted);
+  // Example: client → server → everyone (except sender)
+  socket.on("broadcast", (payload) => {
+    // why: decouple from client naming; validate minimally
+    if (payload && typeof payload === "object") {
+      socket.broadcast.emit("broadcast", payload);
     }
   });
 
-  // remove one
-  socket.on("removeWorker", (raw) => {
-    const w = sanitizeWorker(raw);
-    if (!w) return;
-    const before = workers.length;
-    workers = workers.filter((x) => keyFor(x) !== keyFor(w));
-    if (workers.length !== before) {
-      saveWorkers();
-      io.emit("workerRemoved", w);
+  // Example: join/leave rooms
+  socket.on("join", (room) => {
+    if (typeof room === "string" && room) {
+      socket.join(room);
+      socket.emit("joined", room);
     }
   });
 
-  // clear all
-  socket.on("clearAll", () => {
-    workers = [];
-    saveWorkers();
-    io.emit("allCleared");
+  socket.on("leave", (room) => {
+    if (typeof room === "string" && room) {
+      socket.leave(room);
+      socket.emit("left", room);
+    }
   });
 
-  // ---- activity relay (system-wide "someone is adding info")
-  socket.on("activity", (msg) => {
-    const safe = {
-      type: String(msg?.type || ""),
-      by: String(msg?.by || "User"),
-      total: Number(msg?.total) || 0,
-      done: Number(msg?.done) || 0,
-      added: Number(msg?.added) || 0,
-      failed: Number(msg?.failed) || 0,
-      id: socket.id,
-      ts: Date.now(),
-    };
-    io.emit("activity", safe);
+  // Example: send to a room
+  socket.on("room:event", ({ room, data }) => {
+    if (typeof room === "string" && room) {
+      socket.to(room).emit("room:event", { from: socket.id, data });
+    }
   });
 
-  socket.on("disconnect", () => {
-    // optional: broadcast someone left
-    // io.emit("activity", { type: "left", by: `User-${socket.id.slice(0,5)}`, ts: Date.now(), id: socket.id });
+  socket.on("disconnect", (reason) => {
+    console.log(`[io] disconnected ${socket.id} (${reason})`);
   });
 });
 
-server.listen(PORT, () => console.log(`🌎 Running on :${PORT}`));
+// Start + graceful shutdown
+httpServer.listen(PORT, HOST, () => {
+  console.log(`Server listening on http://${HOST}:${PORT}`);
+});
+
+const shutdown = (signal) => {
+  console.log(`\nReceived ${signal}. Closing...`);
+  // stop accepting new connections
+  httpServer.close((err) => {
+    if (err) {
+      console.error("HTTP close error:", err);
+      process.exit(1);
+    }
+    // close websockets
+    io.close(() => process.exit(0));
+  });
+};
+
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));
