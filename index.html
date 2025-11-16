@@ -1,674 +1,185 @@
-<!DOCTYPE html>
-<html>
+<!-- path: public/index.html -->
+<!doctype html>
+<html lang="en">
 <head>
   <meta charset="utf-8" />
   <title>Distance Viewer</title>
-
-  <!-- Leaflet -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-
-  <!-- Socket.IO -->
-  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
-
-  <!-- CSV & XLSX parsers -->
-  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
-    body { margin:0; display:flex; height:100vh; font-family:Arial,sans-serif; overflow:hidden; }
-    #sidebar { width:460px; background:#fafafa; border-right:1px solid #ddd; padding:14px; overflow-y:auto; }
-    #map { flex:1; }
-
-    .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-    button { cursor:pointer; }
-    .meta { font-size:12px; color:#555; }
-    .pill { display:inline-block; padding:2px 8px; border:1px solid #ccc; border-radius:999px; font-size:12px; background:#fff; }
-
-    .client { padding:8px; margin-bottom:8px; border:1px solid #ddd; border-radius:8px; background:#fff;
-              display:flex; justify-content:space-between; gap:8px; }
-    .client:hover { background:#f3f6ff; }
-    .badge { padding:2px 8px; border-radius:999px; font-size:11px; color:#fff; text-transform:capitalize; }
-    .badge.critical { background:#e53935; }
-    .badge.high     { background:#fb8c00; }
-    .badge.medium   { background:#fdd835; color:#222; }
-    .badge.low      { background:#43a047; }
-
-    .legend { display:flex; gap:10px; align-items:center; flex-wrap:wrap; font-size:12px; margin-top:8px; }
-    .dot { width:10px; height:10px; border-radius:50%; display:inline-block; }
-    .dot.critical{ background:#e53935; } .dot.high{ background:#fb8c00; }
-    .dot.medium{ background:#fdd835; border:1px solid #aaa; } .dot.low{ background:#43a047; }
-    progress { width:100%; }
-
-    .toggle { display:flex; gap:8px; align-items:center; flex-wrap:wrap; font-size:12px; }
-    .toggle label { display:flex; align-items:center; gap:4px; }
-
-    /* Activity feed */
-    .act { padding:6px 8px; border:1px solid #e5e5e5; border-radius:8px; background:#fff; margin-bottom:6px; }
-    .act b { font-weight:600; }
-    .act small { color:#666; }
-    .act progress { width:100%; height:10px; }
+    :root { --bg:#0f172a; --card:#111827; --muted:#9ca3af; --text:#e5e7eb; --accent:#22c55e; --danger:#ef4444; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto; background: var(--bg); color: var(--text); }
+    header { padding: 16px 20px; border-bottom: 1px solid #1f2937; display:flex; gap:16px; align-items:center; }
+    .brand { font-weight:700; letter-spacing:.2px; }
+    .status { padding:4px 10px; border-radius:999px; font-size:12px; background:#1f2937; color:var(--muted); }
+    .status.ok { color:#062; background:#133; }
+    .status.warn { color:#632; background:#221; }
+    main { max-width: 960px; margin: 20px auto; padding: 0 16px; display: grid; gap: 16px; }
+    .card { background: var(--card); border: 1px solid #1f2937; border-radius: 12px; padding: 16px; }
+    .row { display:flex; flex-wrap: wrap; gap:10px; align-items:center; }
+    label { font-size: 12px; color: var(--muted); }
+    input, button, select, textarea {
+      background: #0b1220; color: var(--text); border: 1px solid #1f2937; border-radius: 8px; padding: 10px 12px;
+    }
+    input, select, textarea { min-width: 220px; }
+    button { cursor: pointer; transition: transform .02s ease; }
+    button:active { transform: translateY(1px); }
+    .btn { background:#111b2f; }
+    .btn.primary { border-color:#0f3; }
+    .btn.danger { border-color:#f33; }
+    .grid { display:grid; gap:12px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+    .log { height: 280px; overflow: auto; background:#0b1220; border-radius: 8px; padding: 10px; font: 12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; }
+    .muted { color: var(--muted); }
+    .inline { display:inline-block; }
+    .sep { height:1px; background:#1f2937; margin:12px 0; }
+    .pill { font-size: 12px; padding:3px 8px; border-radius:999px; background:#0b1220; border:1px solid #1f2937; }
+    .hint { font-size:12px; color:var(--muted); }
   </style>
 </head>
 <body>
-  <div id="sidebar">
-    <!-- Therapist -->
-    <div style="margin-bottom:16px; padding-bottom:10px; border-bottom:1px solid #ddd;">
-      <b>Therapist Location</b>
-      <div class="row" style="margin-top:6px;">
-        <input id="therapistInput" type="text" placeholder="Enter ZIP or address" style="flex:1; padding:8px;" />
-        <button id="setTherapistBtn">Set</button>
-        <button id="clearTherapistBtn">Clear</button>
-      </div>
-      <div id="therapistNote" class="meta"></div>
-    </div>
+  <header>
+    <div class="brand">Distance Viewer</div>
+    <div id="conn-status" class="status warn">disconnected</div>
+    <div class="pill">socket id: <span id="sock-id" class="muted">—</span></div>
+  </header>
 
-    <!-- Upload + Level -->
-    <div style="margin-bottom:12px;">
-      <b>Add Clients</b>
-      <div class="row" style="margin-top:6px;">
-        <input type="file" id="fileInput" accept=".csv,.txt,.xlsx" />
-        <select id="levelSelect" title="Level for this file">
-          <option value="critical">Critical</option>
-          <option value="high">High</option>
-          <option value="medium" selected>Medium</option>
-          <option value="low">Low</option>
-        </select>
-        <button id="fitBtn" title="Fit map to all pins">Fit</button>
-      </div>
-      <label class="row" style="margin-top:6px;">
-        <input type="checkbox" id="shareToggle" checked />
-        <span>Share my additions</span>
-      </label>
-      <div class="legend">
-        <span><span class="dot critical"></span> Critical</span>
-        <span><span class="dot high"></span> High</span>
-        <span><span class="dot medium"></span> Medium</span>
-        <span><span class="dot low"></span> Low</span>
-      </div>
-      <div class="toggle" style="margin-top:6px;">
-        <label><input type="checkbox" class="lvl-toggle" value="critical" checked/> Critical</label>
-        <label><input type="checkbox" class="lvl-toggle" value="high" checked/> High</label>
-        <label><input type="checkbox" class="lvl-toggle" value="medium" checked/> Medium</label>
-        <label><input type="checkbox" class="lvl-toggle" value="low" checked/> Low</label>
-      </div>
-      <div id="importStatus" class="meta" style="margin-top:6px;"></div>
-      <progress id="importProgress" value="0" max="100" style="display:none;"></progress>
-    </div>
-
-    <!-- Filters + Export -->
-    <div class="row" style="margin:6px 0;">
-      <input id="searchInput" type="text" placeholder="Search name or address" style="flex:1; padding:8px;" />
-      <input id="radiusInput" type="number" min="0" step="1" placeholder="Radius (mi)" style="width:140px; padding:8px;" />
-      <button id="exportBtn" title="Export visible to CSV">Export CSV</button>
-    </div>
-
-    <!-- Failures UI -->
-    <div class="row" style="margin:6px 0;">
-      <div id="failBox" class="meta" style="display:none;">
-        <b>Failed rows:</b> <span id="failCount">0</span>
-        <button id="downloadFailsBtn" type="button">Download failures.csv</button>
-      </div>
-    </div>
-
-    <!-- Activity feed -->
-    <div class="row" style="margin:6px 0;">
-      <div id="activityFeed" style="width:100%;"></div>
-    </div>
-
-    <!-- Clients -->
-    <div class="row" style="justify-content:space-between;">
-      <div><b>Clients</b></div>
-      <div id="counts" class="pill">0 shown / 0 total</div>
-    </div>
-    <div id="clientList"></div>
-
-    <!-- Global clear -->
-    <div class="row" style="margin-top:10px;">
-      <button id="clearAllBtn" style="background:#fff3f3; border:1px solid #f1bcbc;">Clear All Clients (Global)</button>
-    </div>
-  </div>
-
-  <div id="map"></div>
-
-  <script>
-    const socket = io({ transports: ["websocket"] });
-
-    const map = L.map("map").setView([39.5, -98.35], 4);
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19 }).addTo(map);
-
-    const layers = {
-      critical: L.layerGroup().addTo(map),
-      high:     L.layerGroup().addTo(map),
-      medium:   L.layerGroup().addTo(map),
-      low:      L.layerGroup().addTo(map),
-    };
-    const levelStyle = {
-      critical: { color:"#e53935", fillColor:"#e53935" },
-      high:     { color:"#fb8c00", fillColor:"#fb8c00" },
-      medium:   { color:"#fdd835", fillColor:"#fdd835" },
-      low:      { color:"#43a047", fillColor:"#43a047" },
-    };
-
-    let therapistMarker = null;
-    let therapistLatLng = null;
-
-    let clients = [];
-    const clientKeys = new Set();
-    const markersByKey = new Map();
-    let lastFailures = [];
-
-    const therapistInput = document.getElementById("therapistInput");
-    const therapistNote  = document.getElementById("therapistNote");
-    const clientListDiv  = document.getElementById("clientList");
-    const counts         = document.getElementById("counts");
-    const fileInput      = document.getElementById("fileInput");
-    const levelSelect    = document.getElementById("levelSelect");
-    const importStatus   = document.getElementById("importStatus");
-    const importProgress = document.getElementById("importProgress");
-    const searchInput    = document.getElementById("searchInput");
-    const radiusInput    = document.getElementById("radiusInput");
-    const activityFeed   = document.getElementById("activityFeed");
-
-    const keyFor = (c) => `${(c.name||"").trim().toLowerCase()}|${(c.address||"").trim().toLowerCase()}|${(c.level||"low").toLowerCase()}`;
-
-    function escapeHtml(str) {
-      return String(str ?? "")
-        .replace(/&/g,"&amp;")
-        .replace(/</g,"&lt;")
-        .replace(/>/g,"&gt;")
-        .replace(/"/g,"&quot;")
-        .replace(/'/g,"&#039;");
-    }
-
-    function calcDist(a, b) {
-      const R = 3958.8;
-      const dLat = ((b.lat - a.lat) * Math.PI) / 180;
-      const dLng = ((b.lng - a.lng) * Math.PI) / 180;
-      const lat1 = (a.lat * Math.PI) / 180;
-      const lat2 = (b.lat * Math.PI) / 180;
-      const x = Math.sin(dLat/2)**2 + Math.cos(lat1)*Math.cos(lat2)*Math.sin(dLng/2)**2;
-      return R * (2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x)));
-    }
-
-    async function geocode(addr, attempt = 1, globalFallback = false) {
-      const base = "https://nominatim.openstreetmap.org/search?format=json&limit=1";
-      const countryPart = globalFallback ? "" : "&countrycodes=us";
-      const url = `${base}${countryPart}&q=${encodeURIComponent(addr)}`;
-      try {
-        const r = await fetch(url, { headers: { "Accept-Language": "en", "Referer": location.origin } });
-        if (!r.ok) throw new Error("HTTP " + r.status);
-        const data = await r.json();
-        if (!Array.isArray(data) || data.length === 0) {
-          if (!globalFallback) return geocode(addr, attempt, true);
-          return null;
-        }
-        return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
-      } catch {
-        if (attempt < 3) {
-          await new Promise(res => setTimeout(res, 400 * attempt));
-          return geocode(addr, attempt + 1, globalFallback);
-        }
-        return null;
-      }
-    }
-
-    function ensureMarker(c) {
-      const k = keyFor(c);
-      if (markersByKey.has(k)) return markersByKey.get(k);
-      const style = levelStyle[c.level] || levelStyle.low;
-      const marker = L.circleMarker([c.lat, c.lng], { radius:7, weight:2, opacity:1, fillOpacity:0.9, ...style })
-        .bindPopup(`<b>${escapeHtml(c.name)}</b><br>${escapeHtml(c.address)}<br><span class="badge ${c.level}">${c.level}</span>`);
-      (layers[c.level] || layers.low).addLayer(marker);
-      markersByKey.set(k, marker);
-      return marker;
-    }
-
-    function removeMarker(c) {
-      const k = keyFor(c);
-      const m = markersByKey.get(k);
-      if (m) { m.remove(); markersByKey.delete(k); }
-    }
-
-    function fitToAllMarkers() {
-      const pts = [];
-      markersByKey.forEach(m => pts.push(m.getLatLng()));
-      if (pts.length) map.fitBounds(L.latLngBounds(pts), { padding:[20,20] });
-    }
-
-    function addLocal(c) {
-      const k = keyFor(c);
-      if (clientKeys.has(k)) return false;
-      clientKeys.add(k);
-      clients.push(c);
-      ensureMarker(c);
-      return true;
-    }
-
-    function visibleClients() {
-      const term = searchInput.value.trim().toLowerCase();
-      const radStr = radiusInput.value.trim();
-      const radius = radStr === "" ? null : Math.max(0, Number(radStr));
-      const shownLevels = Array.from(document.querySelectorAll(".lvl-toggle"))
-        .filter(cb => cb.checked).map(cb => cb.value);
-      return clients.filter(c => {
-        if (!shownLevels.includes(c.level)) return false;
-        if (term) {
-          const hay = `${c.name} ${c.address} ${c.level}`.toLowerCase();
-          if (!hay.includes(term)) return false;
-        }
-        if (radius != null && therapistLatLng) {
-          if (calcDist(therapistLatLng, c) > radius) return false;
-        }
-        return true;
-      });
-    }
-
-    function renderList() {
-      const list = therapistLatLng
-        ? visibleClients().sort((a,b) => calcDist(therapistLatLng,a) - calcDist(therapistLatLng,b))
-        : visibleClients();
-
-      clientListDiv.innerHTML = "";
-      counts.textContent = `${list.length} shown / ${clients.length} total`;
-
-      for (const c of list) {
-        const miles = therapistLatLng ? calcDist(therapistLatLng, c).toFixed(1) : "—";
-        const row = document.createElement("div");
-        row.className = "client";
-        row.innerHTML = `
-          <div>
-            <div><b>${escapeHtml(c.name)}</b> <span class="badge ${c.level}">${c.level}</span></div>
-            <div class="meta">${escapeHtml(c.address)}</div>
-            <div class="meta"><b>${miles}</b> miles</div>
-          </div>
+  <main>
+    <section class="card">
+      <div class="grid">
+        <div>
+          <label>Room</label>
           <div class="row">
-            <select data-action="level">
-              ${["critical","high","medium","low"].map(l => `<option value="${l}" ${l===c.level?'selected':''}>${l}</option>`).join('')}
-            </select>
-            <button data-action="fly">Pin</button>
-            <button data-action="delete" title="Remove (global)">🗑️</button>
+            <input id="room" placeholder="e.g. room-1" />
+            <button id="btn-join" class="btn primary">Join</button>
+            <button id="btn-leave" class="btn danger">Leave</button>
           </div>
-        `;
-        row.querySelector('[data-action="fly"]').onclick = () => {
-          const m = ensureMarker(c); map.setView(m.getLatLng(), 12); m.openPopup();
-        };
-        row.querySelector('[data-action="delete"]').onclick = () => socket.emit("removeWorker", c);
-        row.querySelector('[data-action="level"]').onchange = (e) => {
-          const newLevel = e.target.value;
-          if (newLevel !== c.level) changeLevel(c, newLevel);
-        };
-        clientListDiv.appendChild(row);
-      }
+          <div class="hint">Rooms let you target messages to a subset of connected clients.</div>
+        </div>
+
+        <div>
+          <label>Broadcast (to everyone else)</label>
+          <div class="row">
+            <input id="broadcast-text" placeholder='{"msg":"hello"} or plain text' />
+            <button id="btn-broadcast" class="btn">Send</button>
+          </div>
+        </div>
+
+        <div>
+          <label>Send to room</label>
+          <div class="row">
+            <input id="room-target" placeholder="room name" />
+            <input id="room-payload" placeholder='{"msg":"to room"} or text' />
+            <button id="btn-room-send" class="btn">Send to Room</button>
+          </div>
+        </div>
+      </div>
+      <div class="sep"></div>
+      <div class="row">
+        <button id="btn-health" class="btn">Ping /health</button>
+        <span class="hint">Checks the Express route.</span>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="row" style="justify-content:space-between;">
+        <div><strong>Event Log</strong></div>
+        <div class="muted">auto-scrolls</div>
+      </div>
+      <div id="log" class="log" aria-live="polite"></div>
+    </section>
+  </main>
+
+  <!-- Socket.IO client served by server.js -->
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    // Utilities
+    const $ = (id) => document.getElementById(id);
+    const logEl = $("log");
+    const sockIdEl = $("sock-id");
+    const statusEl = $("conn-status");
+
+    function log(type, data) {
+      const time = new Date().toLocaleTimeString();
+      const pre = document.createElement("div");
+      pre.innerHTML = `<span class="muted">[${time}]</span> <strong>${type}:</strong> ${escapeHtml(stringify(data))}`;
+      logEl.appendChild(pre);
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+    function stringify(v) {
+      if (typeof v === "string") return v;
+      try { return JSON.stringify(v); } catch { return String(v); }
+    }
+    function escapeHtml(s) {
+      return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     }
 
-    function changeLevel(oldClient, newLevel) {
-      const oldKey = keyFor(oldClient);
-      if (!clientKeys.has(oldKey)) return;
-      removeMarker(oldClient);
-      clientKeys.delete(oldKey);
-      clients = clients.filter(x => keyFor(x) !== oldKey);
-
-      const updated = { ...oldClient, level: newLevel };
-      addLocal(updated);
-      socket.emit("removeWorker", oldClient);
-      socket.emit("addWorker", updated);
-      renderList();
-    }
-
-    socket.on("currentWorkers", (list) => {
-      clients = []; clientKeys.clear();
-      markersByKey.forEach(m => m.remove()); markersByKey.clear();
-      for (const c of list || []) addLocal({ ...c, level: (c.level||"low").toLowerCase() });
-      renderList(); fitToAllMarkers();
-    });
-
-    socket.on("workerAdded", (c) => {
-      if (addLocal({ ...c, level: (c.level||"low").toLowerCase() })) renderList();
-    });
-
-    socket.on("workersAddedBatch", (arr) => {
-      let changed = false;
-      for (const c of arr || []) changed = addLocal({ ...c, level: (c.level||"low").toLowerCase() }) || changed;
-      if (changed) renderList();
-    });
-
-    socket.on("workerRemoved", (c) => {
-      const w = { ...c, level: (c.level||"low").toLowerCase() };
-      const k = keyFor(w);
-      if (clientKeys.has(k)) {
-        clientKeys.delete(k);
-        clients = clients.filter(x => keyFor(x) !== k);
-        removeMarker(w);
-        renderList();
-      }
-    });
-
-    socket.on("allCleared", () => {
-      clients = [];
-      clientKeys.clear();
-      markersByKey.forEach(m => m.remove());
-      markersByKey.clear();
-      renderList();
-      map.setView([39.5, -98.35], 4);
-    });
-
-    fileInput.addEventListener("change", async function () {
-      const file = this.files?.[0];
-      if (!file) return;
-      const level = levelSelect.value;
-
-      importStatus.textContent = "Parsing file…";
-      importProgress.style.display = "block";
-      importProgress.value = 0;
-      lastFailures = [];
-
-      socket.emit("activity", { type: "uploadStart", by: getDisplayName(), total: 0 });
-
-      let rows = [];
-      try {
-        rows = await readAnyTable(file);
-      } catch {
-        importStatus.textContent = "Could not read file.";
-        importProgress.style.display = "none";
-        return;
-      }
-
-      rows = rows
-        .map(r => ({ name: String(r.name||"").trim(), address: String(r.address||"").trim() }))
-        .filter(r => r.name && r.address);
-
-      socket.emit("activity", { type: "uploadStart", by: getDisplayName(), total: rows.length });
-
-      importStatus.textContent = `Geocoding ${rows.length} row(s)…`;
-      let _lastProgressEmit = 0;
-      const results = await geocodeInBatches(rows, 2, (done, total) => {
-        importProgress.value = Math.floor((done / total) * 100);
-        const now = Date.now();
-        if (now - _lastProgressEmit > 500 || done === total) {
-          _lastProgressEmit = now;
-          socket.emit("activity", { type: "uploadProgress", by: getDisplayName(), done, total });
-        }
-      });
-
-      const share = document.getElementById("shareToggle").checked;
-      const toShare = [];
-      let added = 0, failed = 0;
-
-      for (const r of results) {
-        if (!r.geo) {
-          failed++;
-          lastFailures.push({ name: r.name, address: r.address, reason: "geocode_failed" });
-          continue;
-        }
-        const worker = { name: r.name, address: r.address, lat: r.geo.lat, lng: r.geo.lng, level };
-        if (addLocal(worker)) {
-          added++;
-          if (share) toShare.push(worker);
-        } else {
-          lastFailures.push({ name: r.name, address: r.address, reason: "duplicate" });
-        }
-      }
-
-      if (toShare.length >= 10) socket.emit("addWorkersBatch", toShare);
-      else for (const w of toShare) socket.emit("addWorker", w);
-
-      renderList();
-      fitToAllMarkers();
-      importStatus.textContent = `Done. Added ${added}. Failed ${failed}.`;
-      importProgress.style.display = "none";
-      this.value = "";
-
-      if (lastFailures.length) {
-        document.getElementById("failBox").style.display = "";
-        document.getElementById("failCount").textContent = String(lastFailures.length);
-      } else {
-        document.getElementById("failBox").style.display = "none";
-      }
-      document.getElementById("downloadFailsBtn").onclick = () => {
-        const header = ["name","address","reason"];
-        const lines = [header.join(",")].concat(
-          lastFailures.map(f => [f.name, f.address, f.reason].map(csvCell).join(","))
-        );
-        const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url; a.download = "failures.csv"; a.click();
-        URL.revokeObjectURL(url);
-      };
-
-      socket.emit("activity", { type: "uploadDone", by: getDisplayName(), added, failed });
-    });
-
-    async function readAnyTable(file) {
-      const ext = (file.name.split(".").pop() || "").toLowerCase();
-      if (ext === "xlsx") {
-        const data = await file.arrayBuffer();
-        const wb = XLSX.read(data, { type: "array" });
-        const ws = wb.Sheets[wb.SheetNames[0]];
-        const matrix = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, blankrows: false });
-        return extractNameAddressFromMatrix(matrix);
-      } else {
-        const matrix = await parseCsvToMatrix(file);
-        return extractNameAddressFromMatrix(matrix);
-      }
-    }
-
-    function parseCsvToMatrix(file) {
-      return new Promise((resolve, reject) => {
-        Papa.parse(file, {
-          header: false,
-          skipEmptyLines: true,
-          complete: (res) => resolve(res.data.map(row => row.map(cell => String(cell ?? "")))),
-          error: (err) => reject(err),
-        });
-      });
-    }
-
-    function extractNameAddressFromMatrix(matrix) {
-      const rows = matrix.filter(r => Array.isArray(r) && r.some(x => String(x).trim() !== ""));
-      if (rows.length === 0) return [];
-
-      const headerRow = rows[0].map(x => String(x || "").trim());
-      const looksLikeHeader = headerRow.some(h => /name|first|last|address|street|city|state|zip|postcode|location/i.test(h));
-      const dataRows = looksLikeHeader ? rows.slice(1) : rows;
-
-      const headers = looksLikeHeader
-        ? headerRow.map(h => h.toLowerCase())
-        : headerRow.map((_, i) => `col_${i}`);
-
-      const idx = detectColumns(headers);
-
-      const out = [];
-      for (const r of dataRows) {
-        let name = "";
-        let address = "";
-
-        if (idx.nameStrategy === "full") {
-          name = String(r[idx.name] ?? "").trim();
-        } else if (idx.nameStrategy === "first_last") {
-          const first = String(r[idx.first] ?? "").trim();
-          const last  = String(r[idx.last] ?? "").trim();
-          name = [first, last].filter(Boolean).join(" ").trim();
-        } else {
-          const cells = r.map(x => String(x ?? "").trim()).filter(Boolean);
-          name = cells[0] || "";
-        }
-
-        if (idx.addrStrategy === "full") {
-          address = String(r[idx.address] ?? "").trim();
-        } else if (idx.addrStrategy === "parts") {
-          const parts = [];
-          if (idx.street != null) parts.push(String(r[idx.street] ?? "").trim());
-          if (idx.city   != null) parts.push(String(r[idx.city] ?? "").trim());
-          if (idx.state  != null) parts.push(String(r[idx.state] ?? "").trim());
-          if (idx.zip    != null) parts.push(String(r[idx.zip] ?? "").trim());
-          address = parts.filter(Boolean).join(", ").replace(/\s+,/g, ",").trim();
-        } else {
-          const cells = r.map(x => String(x ?? "").trim()).filter(Boolean);
-          address = cells[1] || "";
-        }
-
-        if (name && address) out.push({ name, address });
-      }
-      return out;
-    }
-
-    function detectColumns(headers) {
-      const H = headers.map(h => h.toLowerCase().trim());
-
-      const nameIdx  = findHeader(H, [/^name$/, /client/, /patient/, /full\s*name/, /contact/, /attn/, /person/]);
-      const firstIdx = findHeader(H, [/^first$/, /^first[_\s]?name$/]);
-      const lastIdx  = findHeader(H, [/^last$/, /^last[_\s]?name$/, /^surname$/]);
-
-      const addrIdx   = findHeader(H, [/^address$/, /^address[_\s]?1$/, /full\s*address/, /^location$/]);
-      const streetIdx = findHeader(H, [/^street$/, /^street[_\s]?1$/, /^address[_\s]?line[_\s]?1$/, /^addr1$/, /^road$/, /^line1$/]);
-      const cityIdx   = findHeader(H, [/^city$/, /^town$/, /^locality$/]);
-      const stateIdx  = findHeader(H, [/^state$/, /^province$/, /^region$/, /^state[_\s]?code$/]);
-      const zipIdx    = findHeader(H, [/^zip$/, /^zipcode$/, /^postal$/, /^postcode$/, /^zip[_\s]?code$/]);
-
-      const result = {
-        nameStrategy: "fallback",
-        addrStrategy: "fallback",
-        name: null, first: null, last: null,
-        address: null, street: null, city: null, state: null, zip: null
-      };
-
-      if (nameIdx != null) { result.nameStrategy = "full"; result.name = nameIdx; }
-      else if (firstIdx != null || lastIdx != null) {
-        result.nameStrategy = "first_last"; result.first = firstIdx ?? null; result.last = lastIdx ?? null;
-      }
-
-      if (addrIdx != null) { result.addrStrategy = "full"; result.address = addrIdx; }
-      else if (streetIdx != null || cityIdx != null || stateIdx != null || zipIdx != null) {
-        result.addrStrategy = "parts";
-        result.street = streetIdx ?? null; result.city = cityIdx ?? null; result.state = stateIdx ?? null; result.zip = zipIdx ?? null;
-      }
-
-      return result;
-    }
-
-    function findHeader(H, patterns) {
-      for (let i = 0; i < H.length; i++) {
-        const h = H[i];
-        for (const p of patterns) if (p.test(h)) return i;
-      }
-      return null;
-    }
-
-    async function geocodeInBatches(rows, concurrency = 2, onProgress = () => {}) {
-      let idx = 0, done = 0;
-      const total = rows.length;
-      const results = Array(total);
-      const worker = async () => {
-        while (true) {
-          const i = idx++; if (i >= total) return;
-          const r = rows[i];
-          const geo = await geocode(r.address);
-          results[i] = { ...r, geo };
-          onProgress(++done, total);
-        }
-      };
-      await Promise.all(Array.from({ length: Math.min(concurrency, total) }, worker));
-      return results;
-    }
-
-    document.querySelectorAll(".lvl-toggle").forEach(cb => cb.addEventListener("change", () => renderList()));
-    searchInput.addEventListener("input", () => renderList());
-    radiusInput.addEventListener("input", () => renderList());
-
-    document.getElementById("exportBtn").onclick = () => {
-      const rows = visibleClients().map(c => [c.name, c.address, c.level, c.lat, c.lng]);
-      const csv = "name,address,level,lat,lng\n" + rows.map(r => r.map(csvCell).join(",")).join("\n");
-      const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url; a.download = "clients.csv"; a.click();
-      URL.revokeObjectURL(url);
-    };
-    function csvCell(v) {
-      const s = String(v ?? "");
-      return /[",\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s;
-    }
-
-    document.getElementById("setTherapistBtn").onclick = async () => {
-      const text = therapistInput.value.trim();
-      if (!text) return;
-      therapistNote.textContent = "Geocoding…";
-      const geo = await geocode(text);
-      if (!geo) { therapistNote.textContent = "Not found."; return; }
-      therapistLatLng = geo;
-      if (therapistMarker) map.removeLayer(therapistMarker);
-      therapistMarker = L.marker([geo.lat, geo.lng], {
-        icon: L.icon({ iconUrl: "https://cdn-icons-png.flaticon.com/512/684/684908.png", iconSize: [40, 40] })
-      }).addTo(map);
-      map.setView([geo.lat, geo.lng], 8);
-      therapistNote.textContent = "";
-      renderList();
-    };
-
-    document.getElementById("clearTherapistBtn").onclick = () => {
-      therapistLatLng = null; therapistInput.value = ""; therapistNote.textContent = "";
-      if (therapistMarker) map.removeLayer(therapistMarker); therapistMarker = null;
-      renderList(); map.setView([39.5, -98.35], 4);
-    };
-
-    document.getElementById("clearAllBtn").onclick = () => {
-      if (confirm("Clear ALL clients for everyone?")) socket.emit("clearAll");
-    };
-
-    document.getElementById("fitBtn").onclick = () => fitToAllMarkers();
-
-    /* Activity feed */
-    let myName = "User";
+    // Connect Socket.IO
+    const socket = io();
     socket.on("connect", () => {
-      const saved = localStorage.getItem("displayName");
-      myName = saved || `User-${socket.id.slice(0,5)}`;
-      localStorage.setItem("displayName", myName);
+      statusEl.textContent = "connected";
+      statusEl.classList.remove("warn");
+      statusEl.classList.add("ok");
+      sockIdEl.textContent = socket.id;
+      log("connect", { id: socket.id });
     });
-    const activeUploads = new Map();
-    socket.on("activity", (a) => {
-      if (!activityFeed) return;
-      if (a.type === "uploadStart") {
-        activeUploads.set(a.by, { done: 0, total: a.total, ts: a.ts });
-      } else if (a.type === "uploadProgress") {
-        const cur = activeUploads.get(a.by) || { done: 0, total: a.total, ts: a.ts };
-        cur.done = a.done; cur.total = a.total; cur.ts = a.ts;
-        activeUploads.set(a.by, cur);
-      } else if (a.type === "uploadDone") {
-        renderActivityLine(`${a.by} finished import — added ${a.added}, failed ${a.failed}`, true);
-        activeUploads.delete(a.by);
-      } else {
-        renderActivityLine(`${a.by}: ${a.type}`, true);
-      }
-      renderActiveUploads();
+    socket.on("disconnect", (reason) => {
+      statusEl.textContent = "disconnected";
+      statusEl.classList.remove("ok");
+      statusEl.classList.add("warn");
+      sockIdEl.textContent = "—";
+      log("disconnect", { reason });
     });
-    function renderActiveUploads() {
-      const finished = Array.from(activityFeed.querySelectorAll(".act[data-finished='1']")).slice(-5);
-      activityFeed.innerHTML = "";
-      for (const [by, s] of activeUploads.entries()) {
-        const pct = s.total ? Math.floor((s.done / s.total) * 100) : 0;
-        const div = document.createElement("div");
-        div.className = "act";
-        div.innerHTML = `
-          <div><b>${escapeHtml(by)}</b> is importing… <small>${s.done}/${s.total}</small></div>
-          <progress max="100" value="${pct}"></progress>
-        `;
-        activityFeed.appendChild(div);
+
+    // Built-in demo events from server.js
+    socket.on("broadcast", (p) => log("broadcast (recv)", p));
+    socket.on("joined", (room) => log("joined", room));
+    socket.on("left", (room) => log("left", room));
+    socket.on("room:event", (p) => log("room:event (recv)", p));
+
+    // UI actions
+    $("btn-broadcast").onclick = () => {
+      const raw = $("broadcast-text").value.trim();
+      const payload = tryParse(raw);
+      socket.emit("broadcast", payload);
+      log("broadcast (sent)", payload);
+    };
+
+    $("btn-join").onclick = () => {
+      const room = $("room").value.trim();
+      if (!room) return;
+      socket.emit("join", room);
+      log("join (sent)", room);
+    };
+
+    $("btn-leave").onclick = () => {
+      const room = $("room").value.trim();
+      if (!room) return;
+      socket.emit("leave", room);
+      log("leave (sent)", room);
+    };
+
+    $("btn-room-send").onclick = () => {
+      const room = $("room-target").value.trim();
+      const raw = $("room-payload").value.trim();
+      if (!room) return;
+      const data = tryParse(raw);
+      socket.emit("room:event", { room, data });
+      log("room:event (sent)", { room, data });
+    };
+
+    $("btn-health").onclick = async () => {
+      try {
+        const r = await fetch("/health");
+        const j = await r.json();
+        log("health", j);
+      } catch (e) {
+        log("health error", String(e));
       }
-      for (const el of finished) activityFeed.appendChild(el);
-    }
-    function renderActivityLine(text, finished=false) {
-      const div = document.createElement("div");
-      div.className = "act";
-      if (finished) div.setAttribute("data-finished","1");
-      div.textContent = text;
-      activityFeed.appendChild(div);
-      const lines = activityFeed.querySelectorAll(".act[data-finished='1']");
-      if (lines.length > 8) activityFeed.removeChild(lines[0]);
-    }
-    function getDisplayName() {
-      return myName || "User";
+    };
+
+    function tryParse(raw) {
+      if (!raw) return {};
+      try { return JSON.parse(raw); } catch { return raw; } // why: allow plain text
     }
   </script>
 </body>
